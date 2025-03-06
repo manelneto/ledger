@@ -11,15 +11,15 @@ pub fn now() -> u128 {
     epoch_duration.as_secs() as u128 * 1000 + epoch_duration.subsec_millis() as u128
 }
 
-pub fn u32_to_bytes(n: u32) -> [u8; 4] {
+pub fn u32_to_bytes(n: &u32) -> [u8; 4] {
     n.to_be_bytes()
 }
 
-pub fn u64_to_bytes(n: u64) -> [u8; 8] {
+pub fn u64_to_bytes(n: &u64) -> [u8; 8] {
     n.to_be_bytes()
 }
 
-pub fn u128_to_bytes(n: u128) -> [u8; 16] {
+pub fn u128_to_bytes(n: &u128) -> [u8; 16] {
     n.to_be_bytes()
 }
 
