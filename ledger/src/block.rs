@@ -1,6 +1,7 @@
 use std::fmt::{ self, Debug, Formatter };
 use super::*;
 
+#[derive(Clone)]
 pub struct Block {
     pub index: u32,
     pub timestamp: u128,
