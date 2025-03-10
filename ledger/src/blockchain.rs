@@ -1,6 +1,6 @@
 // Module: blockchain
 use super::*;
-use std::vec;
+use std::{collections::HashSet, vec};
 //use std::collections::HashMap;
 
 const DIFFICULTY_PREFIX: &str = "00000";
@@ -8,6 +8,8 @@ pub struct Blockchain {
     pub blocks: Vec<Block>,
     //pub uncofirmed_transactions: Vec<Transaction>,
     pub difficulty: usize,
+    unspent_outputs:HashSet<Hash>,
+    
 }
 
 impl Blockchain {
@@ -16,14 +18,21 @@ impl Blockchain {
             blocks: Vec::new(),
             //uncofirmed_transactions: Vec::new(),
             difficulty: DIFFICULTY_PREFIX.len(),
+            unspent_outputs: HashSet::new(),
         };
 
         chain.create_genesis_block();
         chain
     }
 
+    //TODO
     fn create_genesis_block(&mut self){
-        let genesis_block = Block::new(0, now(), vec![0;32], 0, "Genesis block".to_owned());
+        let genesis_block = Block::new(0, now(), vec![0;32], vec![
+            Transaction {
+                inputs: vec![ ],
+                outputs: vec![ ],
+            },
+        ]);
 
         // Calculte the hash of the genesis block
         let hash = genesis_block.hash();
@@ -32,6 +41,8 @@ impl Blockchain {
 
         self.blocks.push(genesis);
     }
+    
+    
 
     pub fn add_block(&mut self, block:Block) -> Result<(), &'static str>{
         let last_block = match self.blocks.last() {
@@ -51,12 +62,58 @@ impl Blockchain {
             return Err("Block hash doesn't meet difficulty requirements");
         }
 
+        if let Some((coinbase,transactions)) = 
+        block.transactions.split_first(){
+            if !coinbase.is_coinbase(){
+                return  Err("InvalidCoinbaseTransaction");
+            }
+            let mut block_spent = HashSet::new();
+            let mut block_created = HashSet::new();
+            let mut total_fee = 0;
+
+            for transaction in transactions{
+                let input_hashes = transaction.input_hashses();
+
+                if !(&input_hashes - &self.unspent_outputs).is_empty() ||
+                    !(&input_hashes & &block_spent).is_empty()
+                {
+                    return Err ("Invalid Input");
+                }
+
+                let input_value = transaction.input_value();
+                let output_value = transaction.output_value();
+
+                if output_value > input_value {
+                    return Err ("Transaction has insufficient input value");
+                }
+
+                let fee = input_value - output_value;
+                total_fee += fee;
+
+                block_spent.extend(input_hashes);
+                block_created.extend(transaction.output_hashses());
+
+            }
+
+
+            //TODO: Add the ammount for mining too
+            if coinbase.output_value() < total_fee {
+                return Err ("InvalidCoinbaseTransaction");
+            } else {
+                block_created.extend(coinbase.output_hashses());
+            }
+
+            self.unspent_outputs.retain(|output| !block_spent.contains(output));
+            self.unspent_outputs.extend(block_created);
+
+        }
+
         self.blocks.push(block);
         Ok(())
     }
 
     //Proof of Work: Mining
-    pub fn mine_block(&mut self, payload: String) -> Result<Block, &'static str> {
+    pub fn mine_block(&mut self) -> Result<Block, &'static str> {
         let last_block = match self.blocks.last(){
             Some(block) => block,
             None => return Err("Blockchain has no blocks"),
@@ -66,8 +123,12 @@ impl Blockchain {
             last_block.index + 1,
             now(),
             last_block.hash.clone(),
-            0,
-            payload,
+            vec![
+            Transaction {
+                inputs: vec![ ],
+                outputs: vec![ ],
+            },
+        ]
         );
 
         self.proof_of_work(&mut new_block)?;
@@ -131,4 +192,5 @@ impl Blockchain {
     pub fn get_last_block(&self) -> Option<&Block> {
         self.blocks.last()
     }
+
 }

@@ -12,13 +12,13 @@ fn main() {
 
     // Mine a few blocks with simple string payloads
     println!("Mining block 1...");
-    match blockchain.mine_block("Test data for block 1".to_string()) {
+    match blockchain.mine_block() {
         Ok(block) => println!("Block mined: {:?}", block),
         Err(e) => println!("Error: {}", e),
     }
 
     println!("\nMining block 2...");
-    match blockchain.mine_block("Test data for block 2".to_string()) {
+    match blockchain.mine_block() {
         Ok(block) => println!("Block mined: {:?}", block),
         Err(e) => println!("Error: {}", e),
     }

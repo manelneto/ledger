@@ -1,8 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub type BHash = Vec<u8>;
-//pub type Address = String; Não sei o que é ainda
-
+pub type Hash = Vec<u8>;
+pub type Address = String; 
 // Get the current time in seconds since the UNIX epoch
 pub fn now() -> u128 {
     let epoch_duration = SystemTime::now()
@@ -40,5 +39,6 @@ mod hashable;
 pub use hashable::Hashable;
 mod blockchain;
 pub use blockchain::Blockchain;
-//mod transaction;
-//pub use transaction::{Transaction, TransactionData};
+pub mod transaction;
+pub use transaction::Transaction;
+//TransactionData};
