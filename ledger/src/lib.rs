@@ -38,3 +38,7 @@ mod block;
 pub use block::Block;
 mod hashable;
 pub use hashable::Hashable;
+mod blockchain;
+pub use blockchain::Blockchain;
+//mod transaction;
+//pub use transaction::{Transaction, TransactionData};

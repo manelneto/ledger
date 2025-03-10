@@ -1,19 +1,39 @@
 use ledgerlib::*;
 
 fn main() {
-    println!("Hello, ledger!");
+    println!("Blockchain Test - Without Transactions");
+    println!("=====================================\n");
 
-    let mut block = Block::new(0,now(),vec![0;32],
-    0,"Genesis block!!".to_owned());
+    // Create a new blockchain
+    let mut blockchain = Blockchain::new();
 
-    println!("{:?}", &block);
+    println!("Created blockchain");
+    println!("Genesis block: {:?}\n", blockchain.get_last_block().unwrap());
 
-    let h = block.hash();
+    // Mine a few blocks with simple string payloads
+    println!("Mining block 1...");
+    match blockchain.mine_block("Test data for block 1".to_string()) {
+        Ok(block) => println!("Block mined: {:?}", block),
+        Err(e) => println!("Error: {}", e),
+    }
 
-    println!("{:?}",&h);
+    println!("\nMining block 2...");
+    match blockchain.mine_block("Test data for block 2".to_string()) {
+        Ok(block) => println!("Block mined: {:?}", block),
+        Err(e) => println!("Error: {}", e),
+    }
 
-    block.hash = h;
+    // Validate the chain
+    println!("\nValidating blockchain...");
+    if blockchain.is_chain_valid() {
+        println!("Blockchain is valid!");
+    } else {
+        println!("Blockchain is invalid!");
+    }
 
-    println!("{:?}", &block);
+    // Print the entire blockchain
+    println!("\nBlockchain:");
+    for (i, block) in blockchain.blocks.iter().enumerate() {
+        println!("Block {}: {:?}", i, block);
+    }
 }
- 
