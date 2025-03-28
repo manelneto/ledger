@@ -87,8 +87,11 @@ impl RoutingTable{
         }
     }
 
-    //TODO: be careful when checking for varying bit if distance is 0
+
     pub fn most_significant_diff(distance: u128)-> u16{
+        if distance == 0 {
+            return 0;
+        }
         distance.ilog2() as u16
     }
 
