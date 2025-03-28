@@ -8,9 +8,9 @@ use sha2::{Sha256, Digest};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Serialize, Deserialize};
 
-//TODO: derive distances
-//TODO: create method to insert value at certain kbucket
+
 //TODO: implement ping, store, find_node, find_value and join
+
 
 
 const K_SIZE: usize = 20;
@@ -23,8 +23,8 @@ struct Node{
     pub address: IpAddr,
     pub port: u16,
     pub routing_table: RoutingTable,
-    pub public_key: Vec<u8>,
-    private_key: Vec<u8>,
+    pub public_key: [u8; 32],
+    private_key: [u8; 32],
     //pub storage:
 }
 
@@ -48,8 +48,8 @@ impl Node{
     pub fn generate_keys() -> (Vec<u8>,Vec<u8>){
         let mut csprng = OsRng;
         let keypair: Keypair = Keypair::generate(&mut csprng);
-        let public_key = keypair.public.to_bytes().to_vec();
-        let private_key = keypair.secret.to_bytes().to_vec();
+        let public_key = keypair.public.to_bytes();
+        let private_key = keypair.secret.to_bytes();
 
         (public_key,private_key)
     }
@@ -63,6 +63,10 @@ impl Node{
         id_bytes.copy_from_slice(&result[0..16]);
         u128::from_be_bytes(id_bytes)
     }
+
+    pub fn calculate_distance(id1: u128, id2: u128) -> u128 {
+        id1 ^ id2
+    }
 }
 
 
@@ -73,7 +77,7 @@ struct RoutingTable{
 }
 
 impl RoutingTable{
-    pub fn new(id: u128, address: IpAddr, port: u16, pub_key:[u8; 32]){
+    pub fn new(id: u128, address: IpAddr, port: u16, pub_key:[u8; 32])-> Self{
         let node_info = (id,address,port,pub_key);
         let kbuckets = vec![Bucket::new(); BUCKET_COUNT];
 
@@ -82,23 +86,33 @@ impl RoutingTable{
             kbuckets,
         }
     }
+
+    //TODO: be careful when checking for varying bit if distance is 0
+    pub fn most_significant_diff(distance: u128)-> u16{
+        distance.ilog2() as u16
+    }
+
+    pub fn add_node(&mut self, index: u16, id: u128, address: IpAddr, port: u16, pub_key:[u8; 32] ){
+        let insert_bucket = &mut self.kbuckets[index as usize];
+        insert_bucket.insert(id, address,port,pub_key);
+    } 
 }
 
 
 #[derive(Clone)]
 struct Bucket{
-    pub node_inst: Vec<(u64, IpAddr, u16, [u8; 32])>,
+    pub node_inst: Vec<(u128, IpAddr, u16, [u8; 32])>,
 }
 
 impl Bucket {
     pub fn new() -> Self {
-        let node_inst = vec![(0, IpAddr::V4("0.0.0.0".parse().unwrap()), 0, [0u8; 32]); 20];
+        let node_inst = Vec::new();
         Bucket {
             node_inst,
         }
     }
 
-    pub fn insert(&mut self, id: u64, address: IpAddr, port: u16, public_key: [u8; 32]) {
+    pub fn insert(&mut self, id: u128, address: IpAddr, port: u16, public_key: [u8; 32]) {
         // Check if we already have the node or if we need to add it
         if self.node_inst.len() < 20 {
             self.node_inst.push((id, address, port, public_key));
