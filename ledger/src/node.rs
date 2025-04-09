@@ -9,13 +9,15 @@ use rand::{rngs::OsRng, RngCore};
 use serde::{Serialize, Deserialize};
 
 
-//TODO: implement ping, store, find_node, find_value and join
-
+//TODO: implement ping, store(technically done), find_node, find_value and join
+//TODO: join network, must ask bootstrap node to do find_node for k values, this way we get info
 
 
 const K_SIZE: usize = 20;
 const NODE_TIMEOUT: Duration = Duration::from_secs(3600);
 const BUCKET_COUNT: usize = 128;
+
+
 
 #[derive(Serialize, Deserialize, Clone)]
 struct Node{
@@ -67,6 +69,18 @@ impl Node{
     pub fn calculate_distance(id1: u128, id2: u128) -> u128 {
         id1 ^ id2
     }
+
+    pub fn get_node_info(&self) -> (u128,IpAddr,u16,[u8;32]){
+        (self.id,self.address,self.port,self.public_key)
+    }
+
+    //pub fn join_network()
+
+    //pub fn find_node()
+
+    //pub fn find_value()
+
+    //pub fn ping
 }
 
 
