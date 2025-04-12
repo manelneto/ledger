@@ -1,0 +1,53 @@
+syntax = "proto3";
+package kademlia;
+
+service Kademlia {
+  rpc Ping (PingRequest) returns (PingReply);
+  rpc Store (StoreRequest) returns (StoreReply);
+  rpc FindNode (FindNodeRequest) returns (FindNodeReply);
+  rpc FindValue (FindValueRequest) returns (FindValueReply);
+}
+
+message Node {
+  bytes id = 1;
+  string ip = 2;
+  int32 port = 3;
+}
+
+message PingRequest {
+  Node sender = 1;
+}
+
+message PingReply {
+  bool alive = 1;
+}
+
+message StoreRequest {
+  Node sender = 1;
+  bytes key = 2;
+  bytes value = 3;
+}
+
+message StoreReply {
+  bool success = 1;
+}
+
+message FindNodeRequest {
+  Node sender = 1;
+  bytes node_id = 2;
+}
+
+message FindNodeReply {
+  repeated Node closest_nodes = 1;
+}
+
+message FindValueRequest {
+  Node sender = 1;
+  bytes key = 2;
+}
+
+message FindValueReply {
+  bool success = 1;
+  optional bytes value = 2;
+  repeated Node closest_nodes = 3;
+}

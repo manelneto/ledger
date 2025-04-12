@@ -11,8 +11,12 @@ path = "src/lib.rs"
 name = "ledger"
 path = "src/main.rs"
 
-
-
 [dependencies]
 hex = "0.4.3"
 sha2 = "0.10.8"
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["full"] }
+
+[build-dependencies]
+tonic-build = "0.12"
