@@ -8,14 +8,13 @@ use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let id = [0u8; 20];
     let address: SocketAddr = "127.0.0.1:50051".parse()?;
-
-    let node = Node::new(id, address);
-    let service = KademliaService::new(node);
+    let node = Node::new(address);
 
     println!("Listening on {}", address);
+    println!("ID: {:02x?}", node.get_id());
 
+    let service = KademliaService::new(node);
     Server::builder()
         .add_service(KademliaServer::new(service))
         .serve(address)
