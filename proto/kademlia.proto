@@ -2,33 +2,33 @@ syntax = "proto3";
 package kademlia;
 
 service Kademlia {
-  rpc Ping (PingRequest) returns (PingReply);
-  rpc Store (StoreRequest) returns (StoreReply);
-  rpc FindNode (FindNodeRequest) returns (FindNodeReply);
-  rpc FindValue (FindValueRequest) returns (FindValueReply);
+  rpc Ping (PingRequest) returns (PingResponse);
+//  rpc Store (StoreRequest) returns (StoreResponse);
+//  rpc FindNode (FindNodeRequest) returns (FindNodeResponse);
+//  rpc FindValue (FindValueRequest) returns (FindValueResponse);
 }
 
 message Node {
   bytes id = 1;
   string ip = 2;
-  int32 port = 3;
+  uint32 port = 3;
 }
 
 message PingRequest {
   Node sender = 1;
 }
 
-message PingReply {
+message PingResponse {
   bool alive = 1;
 }
-
+/*
 message StoreRequest {
   Node sender = 1;
   bytes key = 2;
   bytes value = 3;
 }
 
-message StoreReply {
+message StoreResponse {
   bool success = 1;
 }
 
@@ -37,8 +37,8 @@ message FindNodeRequest {
   bytes node_id = 2;
 }
 
-message FindNodeReply {
-  repeated Node closest_nodes = 1;
+message FindNodeResponse {
+  repeated Node nodes = 1;
 }
 
 message FindValueRequest {
@@ -46,8 +46,8 @@ message FindValueRequest {
   bytes key = 2;
 }
 
-message FindValueReply {
-  bool success = 1;
-  optional bytes value = 2;
-  repeated Node closest_nodes = 3;
+message FindValueResponse {
+  optional bytes value = 1;
+  repeated Node nodes = 2;
 }
+*/

@@ -1,3 +1,27 @@
+mod kademlia;
+
+use kademlia::service::KademliaService;
+use kademlia::kademlia_proto::kademlia_server::KademliaServer;
+use tonic::transport::Server;
+use std::net::SocketAddr;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let addr: SocketAddr = "127.0.0.1:50051".parse()?;
+
+    println!("Listening {}", addr);
+
+    Server::builder()
+        .add_service(KademliaServer::new(KademliaService))
+        .serve(addr)
+        .await?;
+
+    Ok(())
+}
+
+
+/*mod kademlia;
+
 use ledgerlib::*;
 
 fn main() {
@@ -99,4 +123,4 @@ fn main() {
     } else {
         println!("Blockchain is invalid!");
     }
-}
+}*/
