@@ -1,5 +1,6 @@
+use crate::kademlia::constants::{ID_LENGTH, K, KEY_LENGTH};
 use crate::kademlia::kademlia_proto::kademlia_server::Kademlia;
-use crate::kademlia::kademlia_proto::{PingRequest, PingResponse, StoreRequest, StoreResponse, FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse};
+use crate::kademlia::kademlia_proto::{Node as ProtoNode, PingRequest, PingResponse, StoreRequest, StoreResponse, FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse};
 use crate::kademlia::node::Node;
 use tonic::{Request, Response, Status};
 
@@ -11,6 +12,14 @@ impl KademliaService {
     pub fn new(node: Node) -> Self {
         Self { node }
     }
+
+    fn update_routing_table(&self, sender: ProtoNode) {
+        if let Some(sender) = Node::from_sender(&sender) {
+            if let Ok(mut table) = self.node.get_routing_table().write() {
+                table.update(sender);
+            }
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -19,6 +28,10 @@ impl Kademlia for KademliaService {
         let sender = request.into_inner().sender;
 
         println!("PING from: {:?}", sender);
+
+        if let Some(ref node) = sender {
+            self.update_routing_table(node.clone());
+        }
 
         Ok(Response::new(PingResponse {
             alive: true,
@@ -30,20 +43,19 @@ impl Kademlia for KademliaService {
 
         println!("STORE from: {:?}", sender);
 
-        let key: [u8; 20] = match key.try_into() {
-            Ok(k) => k,
-            Err(_) => {
-                return Err(Status::invalid_argument("STORE: KEY length must be 160 bits (20 bytes)"));
-            }
-        };
-
-        let storage_arc = self.node.get_storage();
-        let mut storage = storage_arc.write().unwrap();
-        storage.insert(key, value);
-
-        for (k, v) in storage.iter() {
-            println!("Key: {:02x?}; Value: {:?}", k, String::from_utf8_lossy(v));
+        if let Some(ref node) = sender {
+            self.update_routing_table(node.clone());
         }
+
+        let key: [u8; KEY_LENGTH] = key.try_into().map_err(|_| {
+            Status::invalid_argument("STORE: KEY length must be 160 bits (20 bytes)")
+        })?;
+
+        let storage_lock = self.node.get_storage();
+        let mut storage = storage_lock.write().map_err(|_| {
+           Status::internal("STORE: failed to acquire lock on storage")
+        })?;
+        storage.insert(key, value);
 
         Ok(Response::new(StoreResponse {
             success: true,
@@ -55,15 +67,21 @@ impl Kademlia for KademliaService {
 
         println!("FIND_NODE from: {:?}", sender);
 
-        let id: [u8; 20] = match id.try_into() {
-            Ok(i) => i,
-            Err(_) => {
-                return Err(Status::invalid_argument("FIND_NODE: ID length must be 160 bits (20 bytes)"));
-            }
-        };
+        if let Some(ref node) = sender {
+            self.update_routing_table(node.clone());
+        }
+
+        let id: [u8; ID_LENGTH] = id.try_into().map_err(|_| {
+            Status::invalid_argument("FIND_NODE: KEY length must be 160 bits (20 bytes)")
+        })?;
+
+        let routing_table_lock = self.node.get_routing_table();
+        let routing_table = routing_table_lock.read().map_err(|_| {
+            Status::internal("FIND_NODE: failed to acquire lock on routing table")
+        })?;
 
         Ok(Response::new(FindNodeResponse {
-            nodes: vec![],
+            nodes: routing_table.find_closest_nodes(&id, K).into_iter().map(|n| n.to_send()).collect()
         }))
     }
 
@@ -72,15 +90,18 @@ impl Kademlia for KademliaService {
 
         println!("FIND_VALUE from: {:?}", sender);
 
-        let key: [u8; 20] = match key.try_into() {
-            Ok(k) => k,
-            Err(_) => {
-                return Err(Status::invalid_argument("FIND_VALUE: KEY length must be 160 bits (20 bytes)"));
-            }
-        };
+        if let Some(ref node) = sender {
+            self.update_routing_table(node.clone());
+        }
 
-        let storage_arc = self.node.get_storage();
-        let storage = storage_arc.read().unwrap();
+        let key: [u8; KEY_LENGTH] = key.try_into().map_err(|_| {
+            Status::invalid_argument("FIND_VALUE: KEY length must be 160 bits (20 bytes)")
+        })?;
+
+        let storage_lock = self.node.get_storage();
+        let storage = storage_lock.read().map_err(|_| {
+            Status::internal("FIND_VALUE: failed to acquire lock on storage")
+        })?;
 
         if let Some(value) = storage.get(&key) {
             println!("Key: {:02x?}; Value: {:?}", key, value);
@@ -92,9 +113,14 @@ impl Kademlia for KademliaService {
         } else {
             println!("Key: {:02x?}; Value: NOT FOUND", key);
 
+            let routing_table_lock = self.node.get_routing_table();
+            let table = routing_table_lock.read().map_err(|_| {
+                Status::internal("FIND_VALUE: failed to acquire lock on routing table")
+            })?;
+
             Ok(Response::new(FindValueResponse {
                 value: None,
-                nodes: vec![],
+                nodes: table.find_closest_nodes(&key, K).into_iter().map(|n| n.to_send()).collect(),
             }))
         }
     }

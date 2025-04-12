@@ -1,6 +1,6 @@
-// Module: blockchain
-use super::*;
-use std::vec;
+use crate::ledger::block::Block;
+use crate::ledger::lib::*;
+use crate::ledger::Hashable;
 use std::collections::HashMap;
 
 const DIFFICULTY_PREFIX: &str = "00000";

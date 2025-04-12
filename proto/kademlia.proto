@@ -12,6 +12,7 @@ message Node {
   bytes id = 1;
   string ip = 2;
   uint32 port = 3;
+  bytes public_key = 4;
 }
 
 message PingRequest {

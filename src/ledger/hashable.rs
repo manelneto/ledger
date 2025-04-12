@@ -8,5 +8,4 @@ pub trait Hashable {
         hasher.update(&self.bytes());     
         hasher.finalize().to_vec()
     }
-
 }
