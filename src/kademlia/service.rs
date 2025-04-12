@@ -1,5 +1,5 @@
 use crate::kademlia::kademlia_proto::kademlia_server::Kademlia;
-use crate::kademlia::kademlia_proto::{PingRequest, PingResponse, StoreRequest, StoreResponse, FindValueRequest, FindValueResponse};
+use crate::kademlia::kademlia_proto::{PingRequest, PingResponse, StoreRequest, StoreResponse, FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse};
 use crate::kademlia::node::Node;
 use tonic::{Request, Response, Status};
 
@@ -33,7 +33,7 @@ impl Kademlia for KademliaService {
         let key: [u8; 20] = match key.try_into() {
             Ok(k) => k,
             Err(_) => {
-                return Err(Status::invalid_argument("STORE: key length must be 20 bytes"));
+                return Err(Status::invalid_argument("STORE: KEY length must be 160 bits (20 bytes)"));
             }
         };
 
@@ -50,6 +50,23 @@ impl Kademlia for KademliaService {
         }))
     }
 
+    async fn find_node(&self, request: Request<FindNodeRequest>) -> Result<Response<FindNodeResponse>, Status> {
+        let FindNodeRequest { sender, id } = request.into_inner();
+
+        println!("FIND_NODE from: {:?}", sender);
+
+        let id: [u8; 20] = match id.try_into() {
+            Ok(i) => i,
+            Err(_) => {
+                return Err(Status::invalid_argument("FIND_NODE: ID length must be 160 bits (20 bytes)"));
+            }
+        };
+
+        Ok(Response::new(FindNodeResponse {
+            nodes: vec![],
+        }))
+    }
+
     async fn find_value(&self, request: Request<FindValueRequest>) -> Result<Response<FindValueResponse>, Status> {
         let FindValueRequest { sender, key } = request.into_inner();
 
@@ -58,7 +75,7 @@ impl Kademlia for KademliaService {
         let key: [u8; 20] = match key.try_into() {
             Ok(k) => k,
             Err(_) => {
-                return Err(Status::invalid_argument("FIND_VALUE: key length must be 20 bytes"));
+                return Err(Status::invalid_argument("FIND_VALUE: KEY length must be 160 bits (20 bytes)"));
             }
         };
 

@@ -22,9 +22,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         value,
     });
 
-    let response = client.store(request).await?;
+    let response = client.store(request).await?.into_inner();
 
-    println!("STORE response: {:?}", response.into_inner());
+    println!("STORE response: {:?}", response);
 
     Ok(())
 }

@@ -1,5 +1,5 @@
 use blockchain::kademlia::kademlia_proto::kademlia_client::KademliaClient;
-use blockchain::kademlia::kademlia_proto::{Node, PingRequest};
+use blockchain::kademlia::kademlia_proto::{Node, FindNodeRequest};
 
 use tonic::Request;
 
@@ -13,13 +13,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         port: 12345,
     };
 
-    let request = Request::new(PingRequest {
+    let id = vec![99; 20];
+
+    let request = Request::new(FindNodeRequest {
         sender: Some(sender),
+        id,
     });
 
-    let response = client.ping(request).await?.into_inner();
+    let response = client.find_node(request).await?.into_inner();
 
-    println!("PING response: {:?}", response);
+    println!("FIND_NODE response: {:?}", &response);
 
     Ok(())
 }
