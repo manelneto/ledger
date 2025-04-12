@@ -1,5 +1,5 @@
 use blockchain::kademlia::kademlia_proto::kademlia_client::KademliaClient;
-use blockchain::kademlia::kademlia_proto::{Node, StoreRequest};
+use blockchain::kademlia::kademlia_proto::{Node, FindValueRequest};
 
 use tonic::Request;
 
@@ -14,17 +14,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let key = vec![42; 20];
-    let value = b"Hello, Kademlia!".to_vec();
 
-    let request = Request::new(StoreRequest {
+    let request = Request::new(FindValueRequest {
         sender: Some(sender),
         key,
-        value,
     });
 
-    let response = client.store(request).await?;
+    let response = client.find_value(request).await?.into_inner();
 
-    println!("STORE response: {:?}", response.into_inner());
+    match response.value {
+        Some(value) => {
+            println!("FIND_VALUE response: {:?}", &value);
+        }
+        None => {
+            println!("FIND_VALUE response: NOT FOUND {:?}", response.nodes);
+        }
+    }
 
     Ok(())
 }

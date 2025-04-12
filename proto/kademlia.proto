@@ -5,7 +5,7 @@ service Kademlia {
   rpc Ping (PingRequest) returns (PingResponse);
   rpc Store (StoreRequest) returns (StoreResponse);
 //  rpc FindNode (FindNodeRequest) returns (FindNodeResponse);
-//  rpc FindValue (FindValueRequest) returns (FindValueResponse);
+  rpc FindValue (FindValueRequest) returns (FindValueResponse);
 }
 
 message Node {
@@ -40,7 +40,7 @@ message FindNodeRequest {
 message FindNodeResponse {
   repeated Node nodes = 1;
 }
-
+*/
 message FindValueRequest {
   Node sender = 1;
   bytes key = 2;
@@ -50,4 +50,3 @@ message FindValueResponse {
   optional bytes value = 1;
   repeated Node nodes = 2;
 }
-*/
