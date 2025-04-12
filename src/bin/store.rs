@@ -1,5 +1,5 @@
 use blockchain::kademlia::kademlia_proto::kademlia_client::KademliaClient;
-use blockchain::kademlia::kademlia_proto::{Node, PingRequest};
+use blockchain::kademlia::kademlia_proto::{Node, StoreRequest};
 
 use tonic::Request;
 
@@ -13,13 +13,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         port: 12345,
     };
 
-    let request = Request::new(PingRequest {
+    let key = vec![42; 20];
+    let value = b"Hello, Kademlia!".to_vec();
+
+    let request = Request::new(StoreRequest {
         sender: Some(sender),
+        key,
+        value,
     });
 
-    let response = client.ping(request).await?;
+    let response = client.store(request).await?;
 
-    println!("Pong from: {:?}", response.into_inner());
+    println!("Store response: {:?}", response.into_inner());
 
     Ok(())
 }

@@ -1,5 +1,6 @@
 mod kademlia;
 
+use kademlia::node::Node;
 use kademlia::service::KademliaService;
 use kademlia::kademlia_proto::kademlia_server::KademliaServer;
 use tonic::transport::Server;
@@ -7,18 +8,21 @@ use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr: SocketAddr = "127.0.0.1:50051".parse()?;
+    let id = [0u8; 20];
+    let address: SocketAddr = "127.0.0.1:50051".parse()?;
 
-    println!("Listening {}", addr);
+    let node = Node::new(id, address);
+    let service = KademliaService::new(node);
+
+    println!("Listening on {}", address);
 
     Server::builder()
-        .add_service(KademliaServer::new(KademliaService))
-        .serve(addr)
+        .add_service(KademliaServer::new(service))
+        .serve(address)
         .await?;
 
     Ok(())
 }
-
 
 /*mod kademlia;
 
