@@ -1,5 +1,5 @@
 use crate::kademlia::constants::{ID_LENGTH, CRYPTO_KEY_LENGTH, KEY_LENGTH};
-use crate::kademlia::kademlia_proto::Node as ProtoNode;
+use crate::kademlia::kademlia_proto::{FindNodeRequest, FindValueRequest, Node as ProtoNode, PingRequest, StoreRequest};
 use crate::kademlia::routing_table::RoutingTable;
 use ed25519_dalek::Keypair;
 use rand::rngs::OsRng;
@@ -7,6 +7,8 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
+use tonic::{Request, Status};
+use crate::kademlia::kademlia_proto::kademlia_client::KademliaClient;
 
 #[derive(Clone)]
 pub struct Node {
@@ -34,19 +36,6 @@ impl Node {
         }
     }
 
-    pub fn from_sender(sender: &ProtoNode) -> Option<Self> {
-        let id: [u8; ID_LENGTH] = sender.id.as_slice().try_into().ok()?;
-
-        Some(Self {
-            public_key: sender.public_key.as_slice().try_into().ok()?,
-            private_key: [0; CRYPTO_KEY_LENGTH],
-            id,
-            address: SocketAddr::new(sender.ip.parse().ok()?, sender.port as u16),
-            routing_table: Arc::new(RwLock::new(RoutingTable::new(id))),
-            storage: Arc::new(Default::default()),
-        })
-    }
-
     pub fn get_public_key(&self) -> &[u8; CRYPTO_KEY_LENGTH] {
         &self.public_key
     }
@@ -67,6 +56,19 @@ impl Node {
         self.storage.clone()
     }
 
+    pub fn from_sender(sender: &ProtoNode) -> Option<Self> {
+        let id: [u8; ID_LENGTH] = sender.id.as_slice().try_into().ok()?;
+
+        Some(Self {
+            public_key: sender.public_key.as_slice().try_into().ok()?,
+            private_key: [0; CRYPTO_KEY_LENGTH],
+            id,
+            address: SocketAddr::new(sender.ip.parse().ok()?, sender.port as u16),
+            routing_table: Arc::new(RwLock::new(RoutingTable::new(id))),
+            storage: Arc::new(Default::default()),
+        })
+    }
+
     pub fn to_send(&self) -> ProtoNode {
         ProtoNode {
             id: self.id.to_vec(),
@@ -74,5 +76,94 @@ impl Node {
             port: self.address.port() as u32,
             public_key: self.public_key.to_vec(),
         }
+    }
+
+    pub async fn bootstrap(&self, bootstrap_node: Node) -> Result<(), Box<dyn std::error::Error>> {
+        let mut client = KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
+
+        let request = Request::new(FindNodeRequest {
+            sender: Some(self.to_send()),
+            id: self.id.to_vec(),
+        });
+
+        let response = client.find_node(request).await?.into_inner();
+
+        let mut routing_table = self.routing_table.write().map_err(|_| {
+            Status::internal("BOOTSTRAP: failed to acquire lock on routing table")
+        })?;
+
+        for proto in response.nodes {
+            if let Some(node) = Node::from_sender(&proto) {
+                routing_table.update(node);
+            }
+        }
+
+        println!("BOOTSTRAP: OK");
+
+        Ok(())
+    }
+
+    pub async fn ping(&self, target: &Node) -> Result<bool , Box<dyn std::error::Error>> {
+        let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
+
+        let request = Request::new(PingRequest {
+            sender: Some(self.to_send()),
+        });
+
+        let response = client.ping(request).await?.into_inner();
+
+        Ok(response.alive)
+    }
+
+    pub async fn store(&self, target: &Node, key: [u8; KEY_LENGTH], value: Vec<u8>) -> Result<bool, Box<dyn std::error::Error>> {
+        let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
+
+        let request = Request::new(StoreRequest {
+            sender: Some(self.to_send()),
+            key: key.to_vec(),
+            value,
+        });
+
+        let response = client.store(request).await?.into_inner();
+
+        Ok(response.success)
+    }
+
+
+    pub async fn find_node(&self, target: &Node, id: [u8; ID_LENGTH]) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
+        let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
+
+        let request = Request::new(FindNodeRequest {
+            sender: Some(self.to_send()),
+            id: id.to_vec(),
+        });
+
+        let response = client.find_node(request).await?.into_inner();
+
+        let nodes = response.nodes
+            .into_iter()
+            .filter_map(|proto| Node::from_sender(&proto))
+            .collect();
+
+        Ok(nodes)
+    }
+
+    pub async fn find_value(&self, target: &Node, key: [u8; KEY_LENGTH]) -> Result<(Option<Vec<u8>>, Vec<Node>), Box<dyn std::error::Error>> {
+        let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
+
+        let request = Request::new(FindValueRequest {
+            sender: Some(self.to_send()),
+            key: key.to_vec(),
+        });
+
+        let response = client.find_value(request).await?.into_inner();
+
+        let value = response.value;
+        let nodes = response.nodes
+            .into_iter()
+            .filter_map(|proto| Node::from_sender(&proto))
+            .collect();
+
+        Ok((value, nodes))
     }
 }
