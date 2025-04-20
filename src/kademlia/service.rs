@@ -13,10 +13,10 @@ impl KademliaService {
         Self { node }
     }
 
-    fn update_routing_table(&self, sender: ProtoNode) {
+    async fn update_routing_table(&self, sender: &ProtoNode) {
         if let Some(sender) = Node::from_sender(&sender) {
             if let Ok(mut table) = self.node.get_routing_table().write() {
-                table.update(sender);
+                table.update(sender).await;
             }
         }
     }
@@ -30,7 +30,7 @@ impl Kademlia for KademliaService {
         println!("PING from: {:?}", sender);
 
         if let Some(ref node) = sender {
-            self.update_routing_table(node.clone());
+            self.update_routing_table(node).await;
         }
 
         Ok(Response::new(PingResponse {
@@ -44,7 +44,7 @@ impl Kademlia for KademliaService {
         println!("STORE from: {:?}", sender);
 
         if let Some(ref node) = sender {
-            self.update_routing_table(node.clone());
+            self.update_routing_table(node).await;
         }
 
         let key: [u8; KEY_LENGTH] = key.try_into().map_err(|_| {
@@ -68,7 +68,7 @@ impl Kademlia for KademliaService {
         println!("FIND_NODE from: {:?}", sender);
 
         if let Some(ref node) = sender {
-            self.update_routing_table(node.clone());
+            self.update_routing_table(node).await;
         }
 
         let id: [u8; ID_LENGTH] = id.try_into().map_err(|_| {
@@ -91,7 +91,7 @@ impl Kademlia for KademliaService {
         println!("FIND_VALUE from: {:?}", sender);
 
         if let Some(ref node) = sender {
-            self.update_routing_table(node.clone());
+            self.update_routing_table(node).await;
         }
 
         let key: [u8; KEY_LENGTH] = key.try_into().map_err(|_| {

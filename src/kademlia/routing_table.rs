@@ -34,10 +34,23 @@ impl RoutingTable {
         None
     }
 
-    pub fn update(&mut self, node: Node) {
+    pub async fn update(&mut self, node: Node) {
         if let Some(index) = self.index(node.get_id()) {
             if let Some(bucket) = self.buckets.get_mut(index) {
-                bucket.update(node);
+                if bucket.update(node.clone()) {
+                    return;
+                }
+
+                if let Some(lru) = bucket.get_lru() {
+                    match node.ping(lru).await {
+                        Ok(false) => {
+                            bucket.replace_lru(node)
+                        }
+                        _ => {
+                            return;
+                        }
+                    }
+                }
             }
         }
     }
