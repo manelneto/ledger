@@ -34,25 +34,24 @@ impl RoutingTable {
         None
     }
 
-    pub async fn update(&mut self, node: Node) {
+    pub fn replace_node(&mut self, lru: Node, node: Node) {
+        if let Some(index) = self.index(lru.get_id()) {
+            if let Some(bucket) = self.buckets.get_mut(index) {
+                bucket.replace_lru(node);
+            }
+        }
+    }
+
+    pub fn update(&mut self, node: Node) -> Option<Node> {
         if let Some(index) = self.index(node.get_id()) {
             if let Some(bucket) = self.buckets.get_mut(index) {
                 if bucket.update(node.clone()) {
-                    return;
+                    return None;
                 }
-
-                if let Some(lru) = bucket.get_lru() {
-                    match node.ping(lru).await {
-                        Ok(false) => {
-                            bucket.replace_lru(node)
-                        }
-                        _ => {
-                            return;
-                        }
-                    }
-                }
+                return bucket.get_lru().cloned();
             }
         }
+        None
     }
 
     fn xor_distance(a: &[u8; ID_LENGTH], b: &[u8; ID_LENGTH]) -> [u8; ID_LENGTH] {

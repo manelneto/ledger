@@ -14,9 +14,22 @@ impl KademliaService {
     }
 
     async fn update_routing_table(&self, sender: &ProtoNode) {
-        if let Some(sender) = Node::from_sender(&sender) {
-            if let Ok(mut table) = self.node.get_routing_table().write() {
-                table.update(sender).await;
+        if let Some(sender) = Node::from_sender(sender) {
+            let routing_table_lock = self.node.get_routing_table();
+            let lru = {
+                let mut table = match routing_table_lock.write() {
+                    Ok(lock) => lock,
+                    Err(_) => return,
+                };
+                table.update(sender.clone())
+            };
+
+            if let Some(lru_node) = lru {
+                if let Ok(false) = self.node.ping(&lru_node).await {
+                    if let Ok(mut table) = routing_table_lock.write() {
+                        table.replace_node(lru_node, sender);
+                    }
+                }
             }
         }
     }
