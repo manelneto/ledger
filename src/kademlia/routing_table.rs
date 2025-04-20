@@ -54,7 +54,7 @@ impl RoutingTable {
         None
     }
 
-    fn xor_distance(a: &[u8; ID_LENGTH], b: &[u8; ID_LENGTH]) -> [u8; ID_LENGTH] {
+    pub fn xor_distance(a: &[u8; ID_LENGTH], b: &[u8; ID_LENGTH]) -> [u8; ID_LENGTH] {
         array::from_fn(|i| a[i] ^ b[i])
     }
 }
