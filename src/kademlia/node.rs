@@ -9,7 +9,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use tonic::{Request, Status};
+use tonic::transport::Server;
 use crate::kademlia::kademlia_proto::kademlia_client::KademliaClient;
+use crate::kademlia::kademlia_proto::kademlia_server::KademliaServer;
+use crate::kademlia::service::KademliaService;
 
 #[derive(Clone)]
 pub struct Node {
@@ -264,6 +267,17 @@ impl Node {
         }
 
         None
+    }
+
+    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+        Server::builder()
+            .add_service(KademliaServer::new(KademliaService::new(self.clone())))
+            .serve(self.address)
+            .await?;
+
+        println!("NODE START: {}", self.address);
+
+        Ok(())
     }
 
     pub fn new_with_id(address: SocketAddr, id: [u8; ID_LENGTH]) -> Self {
