@@ -1,10 +1,11 @@
-use crate::kademlia::constants::{ID_LENGTH, CRYPTO_KEY_LENGTH, KEY_LENGTH, K};
+use crate::kademlia::constants::{ALPHA, CRYPTO_KEY_LENGTH, ID_LENGTH, KEY_LENGTH, K};
 use crate::kademlia::kademlia_proto::{FindNodeRequest, FindValueRequest, Node as ProtoNode, PingRequest, StoreRequest};
 use crate::kademlia::routing_table::RoutingTable;
 use ed25519_dalek::Keypair;
+use futures::stream::{FuturesUnordered, StreamExt};
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use tonic::{Request, Status};
@@ -146,7 +147,7 @@ impl Node {
     }
 
 
-    pub async fn find_node(&self, target: &Node, id: [u8; ID_LENGTH]) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
+    pub async fn find_node(&self, target: Node, id: [u8; ID_LENGTH]) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
         let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
         let request = Request::new(FindNodeRequest {
@@ -164,7 +165,7 @@ impl Node {
         Ok(nodes)
     }
 
-    pub async fn find_value(&self, target: &Node, key: [u8; KEY_LENGTH]) -> Result<(Option<Vec<u8>>, Vec<Node>), Box<dyn std::error::Error>> {
+    pub async fn find_value(&self, target: Node, key: [u8; KEY_LENGTH]) -> Result<(Option<Vec<u8>>, Vec<Node>), Box<dyn std::error::Error>> {
         let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
         let request = Request::new(FindValueRequest {
@@ -184,8 +185,6 @@ impl Node {
     }
 
     pub async fn iterative_find_node(&self, target: [u8; ID_LENGTH]) -> Vec<Node> {
-        use std::collections::{HashSet, VecDeque};
-
         let mut closest: Vec<Node> = {
             let routing_table_lock = self.get_routing_table();
             let routing_table = routing_table_lock.read().expect("ITERATIVE_FIND_NODE: failed to read routing table");
@@ -195,25 +194,27 @@ impl Node {
         let mut queried = HashSet::new();
         let mut candidates: VecDeque<Node> = VecDeque::from(closest.clone());
 
-        while let Some(node) = candidates.pop_front() {
-            if !queried.insert(node.get_id().to_vec()) {
-                continue;
-            }
+        while !candidates.is_empty() {
+            let mut parallel_requests = FuturesUnordered::new();
 
-            if let Ok(false) = self.ping(&node).await {
-                continue;
-            }
-
-            if let Ok(nodes) = self.find_node(&node, target).await {
-                for node in nodes {
-                    let id = node.get_id().to_vec();
-                    if !queried.contains(&id) && !candidates.iter().any(|n| n.get_id() == node.get_id()) {
-                        candidates.push_back(node.clone());
+            for _ in 0..ALPHA {
+                if let Some(node) = candidates.pop_front() {
+                    if queried.insert(node.get_id().to_vec()) {
+                        parallel_requests.push(self.find_node(node, target));
                     }
                 }
             }
 
-            closest.push(node);
+            while let Some(Ok(nodes)) = parallel_requests.next().await {
+                for node in nodes {
+                    let it = node.get_id().to_vec();
+                    if !queried.contains(&it) && !candidates.iter().any(|n| n.get_id() == node.get_id()) {
+                        candidates.push_back(node.clone());
+                    }
+                    closest.push(node);
+                }
+            }
+
             closest.sort_by_key(|n| RoutingTable::xor_distance(n.get_id(), &target));
             closest.dedup_by_key(|n| n.get_id().to_vec());
             closest.truncate(K);
@@ -223,8 +224,6 @@ impl Node {
     }
 
     pub async fn iterative_find_value(&self, key: [u8; KEY_LENGTH]) -> Option<Vec<u8>> {
-        use std::collections::{HashSet, VecDeque};
-
         let mut closest: Vec<Node> = {
             let routing_table_lock = self.get_routing_table();
             let routing_table = routing_table_lock.read().expect("ITERATIVE_FIND_VALUE: failed to read routing table");
@@ -234,28 +233,30 @@ impl Node {
         let mut queried = HashSet::new();
         let mut candidates: VecDeque<Node> = VecDeque::from(closest.clone());
 
-        while let Some(node) = candidates.pop_front() {
-            if !queried.insert(node.get_id().to_vec()) {
-                continue;
+        while !candidates.is_empty() {
+            let mut parallel_requests = FuturesUnordered::new();
+
+            for _ in 0..ALPHA {
+                if let Some(node) = candidates.pop_front() {
+                    if queried.insert(node.get_id().to_vec()) {
+                        parallel_requests.push(self.find_value(node, key));
+                    }
+                }
             }
 
-            if let Ok(false) = self.ping(&node).await {
-                continue;
-            }
-
-            if let Ok((value, nodes)) = self.find_value(&node, key).await {
-                if let Some(value) = value {
+            while let Some(Ok((value_opt, nodes))) = parallel_requests.next().await {
+                if let Some(value) = value_opt {
                     return Some(value);
                 }
 
-                for node in &nodes {
+                for node in nodes {
                     let id = node.get_id().to_vec();
                     if !queried.contains(&id) && !candidates.iter().any(|n| n.get_id() == node.get_id()) {
                         candidates.push_back(node.clone());
                     }
+                    closest.push(node);
                 }
 
-                closest.extend(nodes);
                 closest.sort_by_key(|n| RoutingTable::xor_distance(n.get_id(), &key));
                 closest.dedup_by_key(|n| n.get_id().to_vec());
                 closest.truncate(K);

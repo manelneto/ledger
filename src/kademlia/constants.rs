@@ -1,3 +1,4 @@
+pub const ALPHA: usize = 3;
 pub const ID_LENGTH: usize = 20;
 pub const K: usize = 20;
 pub const KEY_LENGTH: usize = 20;
