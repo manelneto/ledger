@@ -249,6 +249,17 @@ impl Node {
 
             while let Some(Ok((value_opt, nodes))) = parallel_requests.next().await {
                 if let Some(value) = value_opt {
+                    closest.push(self.clone());
+                    closest.sort_by_key(|n| RoutingTable::xor_distance(n.get_id(), &key));
+                    closest.dedup_by_key(|n| n.get_id().to_vec());
+
+                    let top: Vec<_> = closest.into_iter().take(K).collect();
+                    if top.iter().any(|n| n.get_id() == self.get_id()) {
+                        if let Ok(mut storage) = self.get_storage().write() {
+                            storage.insert(key, value.clone());
+                        }
+                    }
+
                     return Some(value);
                 }
 
