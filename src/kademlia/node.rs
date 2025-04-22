@@ -1,4 +1,4 @@
-use crate::kademlia::constants::{ALPHA, CRYPTO_KEY_LENGTH, ID_LENGTH, KEY_LENGTH, K};
+use crate::kademlia::constants::{ALPHA, CRYPTO_KEY_LENGTH, ID_LENGTH, KEY_LENGTH, K, TIMEOUT, TRIES};
 use crate::kademlia::kademlia_proto::{FindNodeRequest, FindValueRequest, Node as ProtoNode, PingRequest, StoreRequest};
 use crate::kademlia::routing_table::RoutingTable;
 use ed25519_dalek::Keypair;
@@ -8,6 +8,8 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
+use tokio::time::timeout;
 use tonic::{Request, Status};
 use tonic::transport::Server;
 use crate::kademlia::kademlia_proto::kademlia_client::KademliaClient;
@@ -110,13 +112,19 @@ impl Node {
     pub async fn ping(&self, target: &Node) -> Result<bool , Box<dyn std::error::Error>> {
         let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
-        let request = Request::new(PingRequest {
-            sender: Some(self.to_send()),
-        });
+        for _ in 0..TRIES {
+            let request = Request::new(PingRequest {
+                sender: Some(self.to_send()),
+            });
 
-        let response = client.ping(request).await?.into_inner();
+            let result = timeout(Duration::from_millis(TIMEOUT), client.ping(request)).await;
 
-        Ok(response.alive)
+            if let Ok(Ok(response)) = result {
+                return Ok(response.into_inner().alive);
+            }
+        }
+
+        Ok(false)
     }
 
     pub async fn store(&self, key: [u8; KEY_LENGTH], value: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
@@ -203,12 +211,14 @@ impl Node {
             for _ in 0..ALPHA {
                 if let Some(node) = candidates.pop_front() {
                     if queried.insert(node.get_id().to_vec()) {
-                        parallel_requests.push(self.find_node(node, target));
+                        parallel_requests.push(async move {
+                            timeout(Duration::from_millis(TIMEOUT), self.find_node(node, target)).await
+                        });
                     }
                 }
             }
 
-            while let Some(Ok(nodes)) = parallel_requests.next().await {
+            while let Some(Ok(Ok(nodes))) = parallel_requests.next().await {
                 for node in nodes {
                     let it = node.get_id().to_vec();
                     if !queried.contains(&it) && !candidates.iter().any(|n| n.get_id() == node.get_id()) {
@@ -242,12 +252,14 @@ impl Node {
             for _ in 0..ALPHA {
                 if let Some(node) = candidates.pop_front() {
                     if queried.insert(node.get_id().to_vec()) {
-                        parallel_requests.push(self.find_value(node, key));
+                        parallel_requests.push(async move {
+                            timeout(Duration::from_millis(TIMEOUT), self.find_value(node, key)).await
+                        });
                     }
                 }
             }
 
-            while let Some(Ok((value_opt, nodes))) = parallel_requests.next().await {
+            while let Some(Ok(Ok((value_opt, nodes)))) = parallel_requests.next().await {
                 if let Some(value) = value_opt {
                     closest.push(self.clone());
                     closest.sort_by_key(|n| RoutingTable::xor_distance(n.get_id(), &key));
