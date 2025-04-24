@@ -49,7 +49,6 @@ async fn main() {
     assert_eq!(result, Some(value.clone()));
     println!("Value successfully retrieved by C.");
 
-    // Confirma replicação passiva em C
     let storage_lock = node_c.get_storage();
     let storage = storage_lock.read().unwrap();
     let replicated = storage.get(&key).cloned();
