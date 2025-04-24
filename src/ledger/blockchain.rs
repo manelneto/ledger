@@ -1,12 +1,17 @@
-use crate::ledger::block::Block;
-use crate::ledger::lib::*;
-use crate::ledger::Hashable;
+// Module: blockchain
+use super::*;
+use std::vec;
 use std::collections::HashMap;
+use serde_json;
+use crate::ledger::block::Block;
+use crate::ledger::lib::{now, BHash};
+use crate::ledger::transaction::Transaction;
+use crate::ledger::transaction_pool::SharedTransactionPool;
 
-const DIFFICULTY_PREFIX: &str = "00000";
+const DIFFICULTY_PREFIX: &str = "0000";
 pub struct Blockchain {
     pub blocks: Vec<Block>,
-    //pub uncofirmed_transactions: Vec<Transaction>,
+    pub uncofirmed_transactions: SharedTransactionPool,
     pub difficulty: usize,
     pub forks: HashMap<BHash, Vec<Block>>,
 }
@@ -15,7 +20,7 @@ impl Blockchain {
     pub fn new() -> Self {
         let mut chain = Blockchain {
             blocks: Vec::new(),
-            //uncofirmed_transactions: Vec::new(),
+            uncofirmed_transactions: SharedTransactionPool::new(),
             difficulty: DIFFICULTY_PREFIX.len(),
             forks: HashMap::new(),
         };
@@ -53,15 +58,49 @@ impl Blockchain {
             return Err("Block hash doesn't meet difficulty requirements");
         }
 
+        self.proccess_block_transactions(&block)?;
+
         self.blocks.push(block);
         Ok(())
     }
 
+    fn proccess_block_transactions(&mut self, block: &Block) -> Result<(), &'static str> {
+        if block.index == 0 || !block.payload.starts_with('[') {
+            return Ok(());
+        }
+
+        let transactions: Vec<Transaction> = match serde_json::from_str(&block.payload){
+            Ok(tx) => tx,
+            Err(_) => return Err("Error parsing block transactions"),
+        };
+
+        for tx in &transactions {
+            if !tx.verify(){
+                return Err("Block contains invalid transaction");
+            }
+
+            self.uncofirmed_transactions.remove_transaction(&tx.tx_hash);
+        }
+
+        Ok(())
+    }
+
+    pub fn add_transaction(&mut self, tx: Transaction) -> Result<(), &'static str> {
+        self.uncofirmed_transactions.add_transaction(tx)
+    }
+
     //Proof of Work: Mining
-    pub fn mine_block(&mut self, payload: String) -> Result<Block, &'static str> {
+    pub fn mine_block(&mut self, max_transactions: usize) -> Result<Block, &'static str> {
         let last_block = match self.blocks.last(){
             Some(block) => block,
             None => return Err("Blockchain has no blocks"),
+        };
+
+        let transactions = self.uncofirmed_transactions.get_transactions_4_block(max_transactions);
+
+        let payload = match serde_json::to_string(&transactions){
+            Ok(json) => json,
+            Err(_) => return Err("Error serializing block transactions"),
         };
 
         let mut new_block = Block::new(
@@ -79,9 +118,31 @@ impl Blockchain {
         Ok(new_block)
     }
 
+    // Mine an empty block (for testing)
+    pub fn mine_empty_block(&mut self) -> Result<Block, &'static str> {
+        let last_block = match self.blocks.last(){
+            Some(block) => block,
+            None => return Err("Blockchain has no blocks"),
+        };
+
+        let mut new_block = Block::new(
+            last_block.index + 1,
+            now(),
+            last_block.hash.clone(),
+            0,
+            "Empty block".to_owned(),
+        );
+
+        self.proof_of_work(&mut new_block)?;
+
+        self.add_block(new_block.clone())?;
+
+        Ok(new_block)
+    }
+
     pub fn proof_of_work(&self, block: &mut Block) -> Result<(), &'static str> {
         println!("Mining block {:?}", &block);
-        
+
         let target = "0".repeat(self.difficulty);
 
         loop{
@@ -164,7 +225,7 @@ impl Blockchain {
                 self.resolve_forks();
 
                 return Ok(());
-            } 
+            }
         }
 
         let mut fork_update = false;
@@ -206,7 +267,7 @@ impl Blockchain {
                     forks_to_remove.push(key.clone());
                 }
 
-                break; 
+                break;
             }
             // If fork is invalid, remove him to.
             if !self.is_chain_valid(Some(fork_chain)){
