@@ -1,5 +1,5 @@
 use crate::kademlia::constants::{ALPHA, CRYPTO_KEY_LENGTH, ID_LENGTH, KEY_LENGTH, K, TIMEOUT, TRIES};
-use crate::kademlia::kademlia_proto::{FindNodeRequest, FindValueRequest, Node as ProtoNode, PingRequest, StoreRequest};
+use crate::kademlia::kademlia_proto::{FindNodeRequest, FindValueRequest, Node as ProtoNode, PingRequest, StoreRequest, JoinRequest};
 use crate::kademlia::routing_table::RoutingTable;
 use ed25519_dalek::Keypair;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -317,37 +317,53 @@ impl Node {
     }
 
     pub async fn join_with_pow(&self, bootstrap_node: Node, difficulty: usize) -> Result<(), Box<dyn std::error::Error>> {
- 
+
         if !self.ping(&bootstrap_node).await? {
             return Err("Could not ping bootstrap node".into());
         }
-
+    
         let (nonce, pow_hash) = self.generate_pow(difficulty).await;
-
+    
         let mut client = KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
-        let request = Request::new(JoinRequest {
+        let response = client.join(Request::new(JoinRequest {
             sender: Some(self.to_send()),
             nonce: nonce.to_vec(),
             pow_hash: pow_hash.to_vec(),
-        });
-
-        let response = client.join(request).await?into_inner();
-
+        })).await?.into_inner();
+    
         if !response.accepted {
             return Err("Join request rejected by bootstrap node".into());
         }
-
+    
         let mut routing_table = self.routing_table.write().map_err(|_| {
             Status::internal("JOIN: failed to acquire lock on routing table")
         })?;
-
-        for proto in response.closest_nodes {
-            if let Some(node) = Node::from_sender(&proto) {
-                routing_table.update(node);
-            }
-        }
-
-        println!("JOIN: Successfully joined the network");
+    
+        let ping_futures = response.closest_nodes
+            .into_iter()
+            .filter_map(|proto| {
+                let node = Node::from_sender(&proto)?;
+                // Skip self and invalid nodes
+                (node.get_id() != self.get_id()).then(|| {
+                    routing_table.update(node.clone());
+                    node
+                })
+            })
+            .map(|node| async move {
+                match tokio::time::timeout(
+                    Duration::from_secs(5),
+                    self.ping(&node)
+                ).await {
+                    Ok(Ok(true)) => println!("✅ Successfully pinged {}", node.get_address()),
+                    Ok(Ok(false)) => println!("⚠️ Ping failed to {}", node.get_address()),
+                    Ok(Err(e)) => println!("❌ Ping error to {}: {}", node.get_address(), e),
+                    Err(_) => println!("⌛ Ping timeout to {}", node.get_address()),
+                }
+            });
+    
+        futures::future::join_all(ping_futures).await;
+    
+        println!("🌐 JOIN: Successfully joined the network");
         Ok(())
     }
 

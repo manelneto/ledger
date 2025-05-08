@@ -55,11 +55,11 @@ message FindValueResponse {
 
 message JoinRequest{
   Node sender = 1;
-  bytes node = 2;
+  bytes nonce = 2;
   bytes pow_hash = 3;
 }
 
-message JoinRequest{
+message JoinResponse{
   bool accepted = 1;
   repeated Node closest_nodes = 2;
 }
