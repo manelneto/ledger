@@ -352,7 +352,6 @@ impl Node {
     }
 
     async fn generate_pow(&self, difficulty: usize) -> ([u8; 8], [u8; 32]) {
-        use sha2::{Digest, Sha256};
     
         let mut nonce: u64 = 0;
         let target_prefix = vec![0u8; difficulty];
@@ -375,7 +374,6 @@ impl Node {
     }
 
     pub fn verify_pow(&self, node_id: &[u8], nonce: &[u8], pow_hash: &[u8], difficulty: usize) -> bool {
-        use sha2::{Digest, Sha256};
 
         let mut input = Vec::new();
         input.extend_from_slice(node_id);
