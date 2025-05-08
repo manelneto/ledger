@@ -315,4 +315,78 @@ impl Node {
             storage: Arc::new(RwLock::new(HashMap::new())),
         }
     }
+
+    pub async fn join_with_pow(&self, bootstrap_node: Node, difficulty: usize) -> Result<(), Box<dyn std::error::Error>> {
+ 
+        if !self.ping(&bootstrap_node).await? {
+            return Err("Could not ping bootstrap node".into());
+        }
+
+        let (nonce, pow_hash) = self.generate_pow(difficulty).await;
+
+        let mut client = KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
+        let request = Request::new(JoinRequest {
+            sender: Some(self.to_send()),
+            nonce: nonce.to_vec(),
+            pow_hash: pow_hash.to_vec(),
+        });
+
+        let response = client.join(request).await?into_inner();
+
+        if !response.accepted {
+            return Err("Join request rejected by bootstrap node".into());
+        }
+
+        let mut routing_table = self.routing_table.write().map_err(|_| {
+            Status::internal("JOIN: failed to acquire lock on routing table")
+        })?;
+
+        for proto in response.closest_nodes {
+            if let Some(node) = Node::from_sender(&proto) {
+                routing_table.update(node);
+            }
+        }
+
+        println!("JOIN: Successfully joined the network");
+        Ok(())
+    }
+
+    async fn generate_pow(&self, difficulty: usize) -> ([u8; 8], [u8; 32]) {
+        use sha2::{Digest, Sha256};
+    
+        let mut nonce: u64 = 0;
+        let target_prefix = vec![0u8; difficulty];
+    
+        loop {
+            let mut input = Vec::new();
+            input.extend_from_slice(self.get_id());
+            input.extend_from_slice(&nonce.to_be_bytes());
+    
+            let mut hasher = Sha256::new();
+            hasher.update(&input);
+            let result = hasher.finalize();
+    
+            if result[..difficulty] == target_prefix[..] {
+                return (nonce.to_be_bytes(), result.into());
+            }
+    
+            nonce = nonce.wrapping_add(1); 
+        }
+    }
+
+    pub fn verify_pow(&self, node_id: &[u8], nonce: &[u8], pow_hash: &[u8], difficulty: usize) -> bool {
+        use sha2::{Digest, Sha256};
+
+        let mut input = Vec::new();
+        input.extend_from_slice(node_id);
+        input.extend_from_slice(nonce);
+        
+        let mut hasher = Sha256::new();
+        hasher.update(&input);
+        let computed_hash = hasher.finalize();
+        
+        computed_hash[..difficulty] == vec![0u8; difficulty][..] && 
+        computed_hash.as_slice() == pow_hash
+    }
+
 }
