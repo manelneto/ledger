@@ -1,8 +1,10 @@
 use crate::kademlia::constants::{ID_LENGTH, K, KEY_LENGTH};
 use crate::kademlia::kademlia_proto::kademlia_server::Kademlia;
-use crate::kademlia::kademlia_proto::{Node as ProtoNode, PingRequest, PingResponse, StoreRequest, StoreResponse, FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse};
+use crate::kademlia::kademlia_proto::{Node as ProtoNode, PingRequest, PingResponse, StoreRequest, StoreResponse, FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse, JoinRequest, JoinResponse};
 use crate::kademlia::node::Node;
 use tonic::{Request, Response, Status};
+
+static DIFFICULTY_POW: usize = 2;
 
 pub struct KademliaService {
     node: Node,
@@ -137,4 +139,45 @@ impl Kademlia for KademliaService {
             }))
         }
     }
+
+    async fn join(&self, request: Request<JoinRequest>) -> Result<Response<JoinResponse>, Status> {
+        let JoinRequest { sender, nonce, pow_hash } = request.into_inner();
+        
+        let sender_node = match Node::from_sender(&sender.ok_or(Status::invalid_argument("No sender provided"))?) {
+            Some(node) => node,
+            None => return Err(Status::invalid_argument("Invalid sender node")),
+        };
+
+        if !self.node.verify_pow(sender_node.get_id(), &nonce, &pow_hash, DIFFICULTY_POW) { 
+            return Err(Status::permission_denied("Invalid PoW proof"));
+        }
+
+        self.update_routing_table(&sender_node.to_send()).await;
+
+        let routing_table_lock = self.node.get_routing_table();
+        let routing_table = routing_table_lock.read().map_err(|_| {
+            Status::internal("Failed to acquire lock on routing table")
+        })?;
+
+        let closest_nodes = {
+            let table = self.node.get_routing_table();
+            let unwrap_table = table.read().unwrap();
+            let mut nodes = unwrap_table.find_closest_nodes(sender_node.get_id(), K)
+                .into_iter()
+                .map(|n| n.to_send())
+                .collect::<Vec<_>>();
+            
+            if !nodes.iter().any(|n| n.id == self.node.get_id().to_vec()) {
+                nodes.push(self.node.to_send());
+            }
+
+            nodes
+        };
+
+        Ok(Response::new(JoinResponse {
+            accepted: true,
+            closest_nodes,
+        }))
+    }
 }
+

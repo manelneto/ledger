@@ -6,6 +6,7 @@ service Kademlia {
   rpc Store (StoreRequest) returns (StoreResponse);
   rpc FindNode (FindNodeRequest) returns (FindNodeResponse);
   rpc FindValue (FindValueRequest) returns (FindValueResponse);
+  rpc Join (JoinRequest) returns (JoinResponse);
 }
 
 message Node {
@@ -50,4 +51,15 @@ message FindValueRequest {
 message FindValueResponse {
   optional bytes value = 1;
   repeated Node nodes = 2;
+}
+
+message JoinRequest{
+  Node sender = 1;
+  bytes nonce = 2;
+  bytes pow_hash = 3;
+}
+
+message JoinResponse{
+  bool accepted = 1;
+  repeated Node closest_nodes = 2;
 }
