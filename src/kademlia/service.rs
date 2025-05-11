@@ -4,6 +4,8 @@ use crate::kademlia::kademlia_proto::{Node as ProtoNode, PingRequest, PingRespon
 use crate::kademlia::node::Node;
 use tonic::{Request, Response, Status};
 
+static DIFFICULTY_POW: usize = 2;
+
 pub struct KademliaService {
     node: Node,
 }
@@ -146,7 +148,7 @@ impl Kademlia for KademliaService {
             None => return Err(Status::invalid_argument("Invalid sender node")),
         };
 
-        if !self.node.verify_pow(sender_node.get_id(), &nonce, &pow_hash, 2) { // difficulty set here TODO: change that
+        if !self.node.verify_pow(sender_node.get_id(), &nonce, &pow_hash, DIFFICULTY_POW) { 
             return Err(Status::permission_denied("Invalid PoW proof"));
         }
 
