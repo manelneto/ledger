@@ -1,7 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type BHash = Vec<u8>;
-//pub type Address = String; Não sei o que é ainda
 
 // Get the current time in seconds since the UNIX epoch
 pub fn now() -> u128 {
