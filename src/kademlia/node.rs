@@ -354,16 +354,16 @@ impl Node {
                     Duration::from_secs(5),
                     self.ping(&node)
                 ).await {
-                    Ok(Ok(true)) => println!("✅ Successfully pinged {}", node.get_address()),
-                    Ok(Ok(false)) => println!("⚠️ Ping failed to {}", node.get_address()),
-                    Ok(Err(e)) => println!("❌ Ping error to {}: {}", node.get_address(), e),
-                    Err(_) => println!("⌛ Ping timeout to {}", node.get_address()),
+                    Ok(Ok(true)) => println!(" Successfully pinged {}", node.get_address()),
+                    Ok(Ok(false)) => println!(" Ping failed to {}", node.get_address()),
+                    Ok(Err(e)) => println!(" Ping error to {}: {}", node.get_address(), e),
+                    Err(_) => println!(" Ping timeout to {}", node.get_address()),
                 }
             });
     
         futures::future::join_all(ping_futures).await;
     
-        println!("🌐 JOIN: Successfully joined the network");
+        println!(" JOIN: Successfully joined the network");
         Ok(())
     }
 
