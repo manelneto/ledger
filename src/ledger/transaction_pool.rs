@@ -193,7 +193,8 @@ impl TransactionPool {
             
             // Check nonce sequence for sender
             let sender = &tx.data.sender;
-            let expected_nonce = sender_nonces.get(sender).unwrap_or(&self.nonce_tracker.get_nonce(sender));
+            let default_nonce = self.nonce_tracker.get_nonce(sender);
+            let expected_nonce = sender_nonces.get(sender).unwrap_or(&default_nonce);
             
             if tx.data.nonce != expected_nonce + 1 {
                 continue; // Skip if nonce is not next in sequence

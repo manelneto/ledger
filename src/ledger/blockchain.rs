@@ -369,46 +369,57 @@ impl Blockchain {
                 if (self.blocks.len() - i) > MAX_FORK_DEPTH {
                     return Err("Fork depth exceeded");
                 }
-                
-                // Create a new fork from this point
+
                 let mut fork_chain = self.blocks[0..=i].to_vec();
-                
-                // Validate the fork chain
+
                 if !self.validate_fork_chain(&fork_chain, &block) {
                     return Err("Invalid fork chain");
                 }
-                
+
                 fork_chain.push(block.clone());
                 self.forks.insert(existing_block.hash.clone(), fork_chain);
                 println!("Fork created from block index {}", i);
-                
+
                 self.resolve_forks();
                 return Ok(());
             }
         }
 
-        let mut fork_update = false;
-
-        for (_, fork_chain) in &mut self.forks {
-            if let Some(last_fork_block) = fork_chain.last() {
-                if block.prev_hash == last_fork_block.hash && block.index == last_fork_block.index + 1 {
-                    // Validate block against fork
-                    if self.validate_block_for_fork(fork_chain, &block) {
-                        fork_chain.push(block.clone());
-                        fork_update = true;
-                        println!("Block added to existing fork");
-                        break;
+        let fork_key_to_update = self
+            .forks
+            .iter()
+            .find_map(|(key, fork_chain)| {
+                fork_chain.last().and_then(|last_block| {
+                    if block.prev_hash == last_block.hash && block.index == last_block.index + 1 {
+                        Some(key.clone())
+                    } else {
+                        None
                     }
+                })
+            });
+
+        if let Some(key) = fork_key_to_update {
+            let is_valid = {
+                if let Some(fork_chain) = self.forks.get(&key) {
+                    self.validate_block_for_fork(fork_chain, &block)
+                } else {
+                    false
+                }
+            };
+
+            if is_valid {
+                if let Some(fork_chain) = self.forks.get_mut(&key) {
+                    fork_chain.push(block.clone());
+                    println!("Block added to existing fork");
+                    self.resolve_forks();
+                    return Ok(());
                 }
             }
         }
 
-        if fork_update {
-            self.resolve_forks();
-            return Ok(());
-        }
         Err("Block doesn't fit in any chain")
     }
+
 
     // Enhanced fork chain validation
     fn validate_fork_chain(&self, fork_chain: &Vec<Block>, new_block: &Block) -> bool {
@@ -462,38 +473,33 @@ impl Blockchain {
     pub fn resolve_forks(&mut self) {
         let main_chain_length = self.blocks.len();
         let mut forks_to_remove = Vec::new();
+        let fork_keys: Vec<_> = self.forks.keys().cloned().collect(); // evita empréstimos diretos
 
-        for (fork_key, fork_chain) in &self.forks {
-            // Only consider forks within reasonable length
-            if fork_chain.len() > main_chain_length + MAX_FORK_DEPTH {
-                println!("Rejecting excessively long fork");
-                forks_to_remove.push(fork_key.clone());
-                continue;
-            }
+        for fork_key in fork_keys {
+            let fork_chain_cloned = self.forks.get(&fork_key).cloned();
 
-            // If the fork is valid and properly longer
-            if self.is_chain_valid(Some(fork_chain)) && fork_chain.len() > main_chain_length {
-                // Additional security: check cumulative work
-                if self.get_cumulative_work(fork_chain) > self.get_cumulative_work(&self.blocks) {
-                    println!("Found longer valid fork (length: {})", fork_chain.len());
-                    
-                    // Revert balances to fork state
-                    self.revert_to_fork_state(fork_chain);
-                    
-                    // Adopt the fork
-                    self.blocks = fork_chain.clone();
-                    
-                    // Clear all forks
-                    for key in self.forks.keys() {
-                        forks_to_remove.push(key.clone());
-                    }
-                    break;
+            if let Some(fork_chain) = fork_chain_cloned {
+                if fork_chain.len() > main_chain_length + MAX_FORK_DEPTH {
+                    println!("Rejecting excessively long fork");
+                    forks_to_remove.push(fork_key.clone());
+                    continue;
                 }
-            }
-            
-            // Remove invalid forks
-            if !self.is_chain_valid(Some(fork_chain)) {
-                forks_to_remove.push(fork_key.clone());
+
+                if self.is_chain_valid(Some(&fork_chain)) && fork_chain.len() > main_chain_length {
+                    if self.get_cumulative_work(&fork_chain) > self.get_cumulative_work(&self.blocks) {
+                        println!("Found longer valid fork (length: {})", fork_chain.len());
+
+                        self.revert_to_fork_state(&fork_chain);
+                        self.blocks = fork_chain.clone();
+
+                        forks_to_remove.extend(self.forks.keys().cloned());
+                        break;
+                    }
+                }
+
+                if !self.is_chain_valid(Some(&fork_chain)) {
+                    forks_to_remove.push(fork_key.clone());
+                }
             }
         }
 
