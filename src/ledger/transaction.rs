@@ -267,7 +267,6 @@ impl Transaction {
         Ok(Self::create_signed(tx_data, key_pair))
     }
 
-    // Create a data transaction
     pub fn create_data_tx(
         key_pair: &Keypair,
         data: String,
