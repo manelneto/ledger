@@ -8,7 +8,6 @@ pub enum AuctionCommand {
         id: String,
         title: String,
         description: String,
-        reserve_price: u64,
     },
     StartAuction {
         id: String,
@@ -46,14 +45,12 @@ pub fn tx_create_auction(
     id: String,
     title: String,
     description: String,
-    reserve_price: u64,
     nonce: u64,
 ) -> Result<Transaction, &'static str> {
     let command = AuctionCommand::CreateAuction {
         id,
         title,
         description,
-        reserve_price,
     };
     create_auction_tx(key_pair, command, nonce)
 }
