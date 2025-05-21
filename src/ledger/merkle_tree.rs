@@ -1,6 +1,7 @@
 
 use super::*;
 use sha2::{Sha256, Digest};
+use crate::ledger::transaction::Transaction;
 
 pub type MerkleHash = Vec<u8>;
 
@@ -257,7 +258,7 @@ impl Hashable for MerkleTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ledger::transaction::Transaction;
+    use crate::ledger::transaction::{Transaction, TransactionData, TransactionType};
 
     #[test]
     fn test_merkle_tree_creation() {
@@ -275,6 +276,7 @@ mod tests {
                     data: Some(format!("Test {}", i)),
                     nonce: 0,
                     fee: 0,
+                    valid_until: None,
                 },
                 signature: vec![],
                 tx_hash: tx_hash.clone(),
@@ -303,6 +305,7 @@ mod tests {
                     data: Some(format!("Test {}", i)),
                     nonce: 0,
                     fee: 0,
+                    valid_until: None,
                 },
                 signature: vec![],
                 tx_hash: tx_hash.clone(),
