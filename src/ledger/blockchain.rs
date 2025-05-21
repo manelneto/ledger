@@ -22,7 +22,7 @@ pub struct Blockchain {
     pub uncofirmed_transactions: SharedTransactionPool,
     pub difficulty: usize,
     pub forks: HashMap<BHash, Vec<Block>>,
-    balances: HashMap<Vec<u8>, u64>,
+    pub balances: HashMap<Vec<u8>, u64>,
 }
 
 // Light client struct (was missing declaration)
