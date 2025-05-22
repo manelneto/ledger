@@ -8,7 +8,7 @@ use crate::ledger::transaction::{Transaction, TxHash, PublicKey, TransactionType
 const MAX_POOL_SIZE: usize = 10000;
 const MAX_TXS_PER_SENDER: usize = 50;
 const TX_EXPIRY_TIME: Duration = Duration::from_secs(3600); // 1 hour
-const MIN_FEE_RATE: u64 = 100; // Minimum fee per transaction
+const MIN_FEE_RATE: u64 = 0; // Minimum fee per transaction
 
 // Transaction with metadata for the pool
 #[derive(Clone)]
