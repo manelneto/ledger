@@ -1,6 +1,11 @@
 use crate::auction::auction::collect_auctions;
 use crate::auction::auction::AuctionStatus;
+use crate::auction::auction_commands::tx_bid;
+use crate::auction::auction_commands::tx_create_auction;
+use crate::auction::auction_commands::tx_end_auction;
+use crate::auction::auction_commands::tx_start_auction;
 use crate::auction::auction_commands::AuctionCommand;
+use crate::ledger::blockchain::Blockchain;
 use crate::ledger::transaction::{Transaction, TransactionData, TransactionType};
 use ed25519_dalek::Keypair;
 use rand::rngs::OsRng;
@@ -209,3 +214,100 @@ fn create_auction_tx(
         assert_eq!(auction.highest_bid, Some((100, bidder.public.to_bytes().to_vec())));
         assert_eq!(auction.status, AuctionStatus::Active);
     }
+
+    #[test]
+fn test_auction_lifecycle() {
+    // Initialize blockchain and keypairs
+    let mut blockchain = Blockchain::new();
+    let mut csprng = OsRng;
+    let owner_keypair = Keypair::generate(&mut csprng);
+    let bidder1_keypair = Keypair::generate(&mut csprng);
+    let bidder2_keypair = Keypair::generate(&mut csprng);
+
+    // Give some initial balances
+    blockchain.balances.insert(owner_keypair.public.to_bytes().to_vec(), 1000);
+    blockchain.balances.insert(bidder1_keypair.public.to_bytes().to_vec(), 500);
+    blockchain.balances.insert(bidder2_keypair.public.to_bytes().to_vec(), 500);
+
+    let auction_id = "auction-1".to_string();
+
+    // 1. Create auction
+    let create_tx = tx_create_auction(
+        &owner_keypair,
+        auction_id.clone(),
+        "Rare Painting".to_string(),
+        "A beautiful renaissance painting".to_string(),
+        blockchain.get_next_nonce(&owner_keypair.public.to_bytes().to_vec()),
+    ).unwrap();
+    blockchain.add_transaction(create_tx).unwrap();
+    blockchain.mine_block(10).unwrap();
+
+    // 2. Start auction
+    let start_tx = tx_start_auction(
+        &owner_keypair,
+        auction_id.clone(),
+        blockchain.get_next_nonce(&owner_keypair.public.to_bytes().to_vec()),
+    ).unwrap();
+    blockchain.add_transaction(start_tx).unwrap();
+    blockchain.mine_block(10).unwrap();
+
+    // 3. Place bids
+    let bid1_tx = tx_bid(
+        &bidder1_keypair,
+        auction_id.clone(),
+        100,
+        blockchain.get_next_nonce(&bidder1_keypair.public.to_bytes().to_vec()),
+    ).unwrap();
+    blockchain.add_transaction(bid1_tx).unwrap();
+
+    let bid2_tx = tx_bid(
+        &bidder2_keypair,
+        auction_id.clone(),
+        150,
+        blockchain.get_next_nonce(&bidder2_keypair.public.to_bytes().to_vec()),
+    ).unwrap();
+    blockchain.add_transaction(bid2_tx).unwrap();
+    blockchain.mine_block(10).unwrap();
+
+    // 4. End auction
+    let end_tx = tx_end_auction(
+        &owner_keypair,
+        auction_id.clone(),
+        blockchain.get_next_nonce(&owner_keypair.public.to_bytes().to_vec()),
+    ).unwrap();
+    blockchain.add_transaction(end_tx).unwrap();
+    blockchain.mine_block(10).unwrap();
+
+    // Collect all transactions
+    let all_txs: Vec<Transaction> = blockchain.blocks
+        .iter()
+        .flat_map(|block| block.transactions.clone())
+        .collect();
+
+    let auctions = collect_auctions(&all_txs);
+
+    // ✅ Assert auction exists
+    let auction = auctions.get(&auction_id)
+        .expect("Auction should be found in collected auctions");
+
+    // ✅ Assert final state
+    assert_eq!(auction.status, AuctionStatus::Ended, "Auction should have ended");
+    assert_eq!(
+        auction.highest_bid,
+        Some((150, bidder2_keypair.public.to_bytes().to_vec())),
+        "Highest bid should be 150 from bidder2"
+    );
+
+    // ✅ Optional: Print auction state (useful for debugging)
+    println!("Auction State:");
+    println!("ID: {}", auction.auction_id);
+    println!("Title: {}", auction.title);
+    println!("Status: {:?}", auction.status);
+    println!("Owner: {}", hex::encode(&auction.owner));
+    match &auction.highest_bid {
+        Some((amount, bidder)) => {
+            println!("Highest bid: {} from {}", amount, hex::encode(bidder));
+        }
+        None => println!("No bids placed"),
+    }
+}

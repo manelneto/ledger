@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ledger::transaction::{Transaction, TransactionType};
+use crate::ledger::{blockchain::Blockchain, transaction::{Transaction, TransactionType}};
 use serde::{Deserialize, Serialize};
 use crate::auction::auction_commands::AuctionCommand;
 
@@ -23,6 +23,24 @@ pub struct Auction {
     pub start_time: Option<u128>,
     pub end_time: Option<u128>,
     pub highest_bid: Option<(u64, Vec<u8>)>,
+}
+
+fn find_auction_transactions(blockchain: &Blockchain) -> Vec<&Transaction> {
+    let mut auction_txs = Vec::new();
+    
+    for block in &blockchain.blocks {
+        for tx in &block.transactions {
+            if tx.data.tx_type != TransactionType::Data { continue; }
+
+            if let Some(data) = &tx.data.data {
+                if data.starts_with("AUCTION_") {
+                    auction_txs.push(tx);
+                }
+            }
+        }
+    }
+
+    auction_txs
 }
 
 fn parse_auction_command(data: &str) -> Option<AuctionCommand> {
