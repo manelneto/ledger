@@ -11,7 +11,7 @@ pub type TxHash = Vec<u8>;
 pub type PublicKey = Vec<u8>;
 pub type Signature = Vec<u8>;
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub enum TransactionType {
     Transfer,
     Data,
