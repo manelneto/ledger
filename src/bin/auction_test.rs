@@ -16,7 +16,7 @@ fn print_tx(tx: &Transaction, label: &str) {
     println!("  Sender: {}", sender);
     println!("  Fee: {}", tx.data.fee);
     if let Some(ref data) = tx.data.data {
-        println!("  Data: {}", if data.len() > 100 { &data[0..100] } else { data });
+        println!("  Data: {}", data);
     }
     
     // Debug size estimation
@@ -95,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create auction
     let create_auction_tx = {
         // Get the auction command data
-        let auction_cmd = blockchain::ledger::auction_commands::AuctionCommand::CreateAuction {
+        let auction_cmd = blockchain::auction::auction_commands::AuctionCommand::CreateAuction {
             id: "auction1".to_string(),
             title: "Rare Book Collection".to_string(),
             description: "First edition of classic novels".to_string(),
@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Start auction
     let start_auction_tx = {
-        let auction_cmd = blockchain::ledger::auction_commands::AuctionCommand::StartAuction { 
+        let auction_cmd = blockchain::auction::auction_commands::AuctionCommand::StartAuction { 
             id: "auction1".to_string() 
         };
         let data = format!("AUCTION_{}", serde_json::to_string(&auction_cmd)?);
@@ -130,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Bob places bid
     let bob_bid_tx = {
-        let auction_cmd = blockchain::ledger::auction_commands::AuctionCommand::Bid { 
+        let auction_cmd = blockchain::auction::auction_commands::AuctionCommand::Bid { 
             id: "auction1".to_string(),
             amount: 1000,
         };
@@ -147,7 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Charlie places higher bid
     let charlie_bid_tx = {
-        let auction_cmd = blockchain::ledger::auction_commands::AuctionCommand::Bid { 
+        let auction_cmd = blockchain::auction::auction_commands::AuctionCommand::Bid { 
             id: "auction1".to_string(),
             amount: 1500,
         };
@@ -164,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // End auction
     let end_auction_tx = {
-        let auction_cmd = blockchain::ledger::auction_commands::AuctionCommand::EndAuction { 
+        let auction_cmd = blockchain::auction::auction_commands::AuctionCommand::EndAuction { 
             id: "auction1".to_string() 
         };
         let data = format!("AUCTION_{}", serde_json::to_string(&auction_cmd)?);

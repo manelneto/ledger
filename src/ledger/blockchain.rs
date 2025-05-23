@@ -70,6 +70,7 @@ impl Blockchain {
         }
 
         let time_diff = block.timestamp.saturating_sub(last_block.timestamp);
+        
         if time_diff < MIN_BLOCK_TIME {
             return Err("Block time is too short");
         }

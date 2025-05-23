@@ -11,7 +11,7 @@ pub type TxHash = Vec<u8>;
 pub type PublicKey = Vec<u8>;
 pub type Signature = Vec<u8>;
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub enum TransactionType {
     Transfer,
     Data,
@@ -267,7 +267,6 @@ impl Transaction {
         Ok(Self::create_signed(tx_data, key_pair))
     }
 
-    // Create a data transaction
     pub fn create_data_tx(
         key_pair: &Keypair,
         data: String,
