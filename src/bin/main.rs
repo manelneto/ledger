@@ -4,6 +4,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use tonic::Status;
 use tonic::transport::Server;
+use blockchain::auction::auction_commands::AuctionCommand;
 use blockchain::kademlia::kademlia_proto::kademlia_server::KademliaServer;
 use blockchain::kademlia::node::Node;
 use blockchain::kademlia::service::KademliaService;
@@ -48,6 +49,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("3. FIND NODE");
         println!("4. FIND VALUE");
         println!("5. WHO AM I?");
+        println!("6. CREATE AUCTION");
+        println!("7. START AUCTION");
+        println!("8. END AUCTION");
+        println!("9. PLACE BID");
         print!("\nOption: ");
         io::stdout().flush().unwrap();
 
@@ -69,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         routing_table.remove(&target);
                     }
                 }
-            }
+            },
             "2" => {
                 let key = prompt_hex("Key (40 hex chars): ");
                 let value = prompt("Value: ").into_bytes();
@@ -80,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     Err(_) => println!("Key must be exactly 40 hex characters (20 bytes)."),
                 }
-            }
+            },
             "3" => {
                 let id = prompt_hex("Target ID (40 hex chars): ");
                 let port: u16 = prompt_parse("Target Port: ");
@@ -99,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(_) => println!("ID must be exactly 40 hex characters (20 bytes)."),
                 }
-            }
+            },
             "4" => {
                 let key = prompt_hex("Key (40 hex chars): ");
                 let port: u16 = prompt_parse("Target Port: ");
@@ -122,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(_) => println!("Key must be exactly 40 hex characters (20 bytes)."),
                 }
-            }
+            },
             "5" => {
                 println!("I am {}", node);
                 let routing_table_lock = node.get_routing_table();
@@ -130,7 +135,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Status::internal("MAIN: failed to acquire lock on routing table")
                 })?;
                 println!("{}", *routing_table);
-            }
+            },
+            "6" => {
+                let id = prompt("Auction ID: ");
+                let title = prompt("Title: ");
+                let description = prompt("Description: ");
+                let command = AuctionCommand::CreateAuction { id: id.clone(), title, description };
+
+                let serialized = format!("AUCTION_{}", serde_json::to_string(&command)?);
+                let key = sha256_truncate(&id);
+
+                match node.store(key, serialized.into_bytes()).await {
+                    Ok(_) => println!("Auction created and stored successfully!"),
+                    Err(e) => println!("Error storing auction: {}", e),
+                }
+            },
+            "7" => {
+                let id = prompt("Auction ID: ");
+                let command = AuctionCommand::StartAuction { id: id.clone() };
+
+                let serialized = format!("AUCTION_{}", serde_json::to_string(&command)?);
+                let key = sha256_truncate(&format!("{}_start", id));
+
+                match node.store(key, serialized.into_bytes()).await {
+                    Ok(_) => println!("Auction started successfully!"),
+                    Err(e) => println!("Error starting auction: {}", e),
+                }
+            },
+            "8" => {
+                let id = prompt("Auction ID: ");
+                let command = AuctionCommand::EndAuction { id: id.clone() };
+
+                let serialized = format!("AUCTION_{}", serde_json::to_string(&command)?);
+                let key = sha256_truncate(&format!("{}_end", id));
+
+                match node.store(key, serialized.into_bytes()).await {
+                    Ok(_) => println!("Auction ended successfully!"),
+                    Err(e) => println!("Error ending auction: {}", e),
+                }
+            },
+            "9" => {
+                let id = prompt("Auction ID: ");
+                let amount: u64 = prompt_parse("Bid amount (integer): ");
+                let command = AuctionCommand::Bid { id: id.clone(), amount };
+
+                let serialized = format!("AUCTION_{}", serde_json::to_string(&command)?);
+                let key = sha256_truncate(&format!("{}_bid_{}", id, amount));
+
+                match node.store(key, serialized.into_bytes()).await {
+                    Ok(_) => println!("Bid placed successfully!"),
+                    Err(e) => println!("Error placing bid: {}", e),
+                }
+            },
             _ => println!("Invalid option."),
         }
     }
@@ -165,3 +221,14 @@ fn prompt_parse<T: FromStr>(msg: &str) -> T {
         }
     }
 }
+
+fn sha256_truncate(input: &str) -> [u8; 20] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+    let mut hash = [0u8; 20];
+    hash.copy_from_slice(&result[..20]);
+    hash
+}
+

@@ -422,21 +422,21 @@ impl Node {
     async fn generate_pow(&self, difficulty: usize) -> ([u8; 8], [u8; 32]) {
         let mut nonce: u64 = 0;
         let target_prefix = vec![0u8; difficulty];
-    
+
         loop {
             let mut input = Vec::new();
             input.extend_from_slice(self.get_id());
             input.extend_from_slice(&nonce.to_be_bytes());
-    
+
             let mut hasher = Sha256::new();
             hasher.update(&input);
             let result = hasher.finalize();
-    
+
             if result[..difficulty] == target_prefix[..] {
                 return (nonce.to_be_bytes(), result.into());
             }
-    
-            nonce = nonce.wrapping_add(1); 
+
+            nonce = nonce.wrapping_add(1);
         }
     }
 
@@ -444,11 +444,11 @@ impl Node {
         let mut input = Vec::new();
         input.extend_from_slice(node_id);
         input.extend_from_slice(nonce);
-        
+
         let mut hasher = Sha256::new();
         hasher.update(&input);
         let computed_hash = hasher.finalize();
-        
+
         computed_hash[..difficulty] == vec![0u8; difficulty][..] && computed_hash.as_slice() == pow_hash
     }
 }

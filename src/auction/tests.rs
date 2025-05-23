@@ -300,7 +300,7 @@ fn test_auction_lifecycle() {
 
     // ✅ Optional: Print auction state (useful for debugging)
     println!("Auction State:");
-    println!("ID: {}", auction.auction_id);
+    println!("ID: {}", auction.id);
     println!("Title: {}", auction.title);
     println!("Status: {:?}", auction.status);
     println!("Owner: {}", hex::encode(&auction.owner));

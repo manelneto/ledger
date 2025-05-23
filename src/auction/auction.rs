@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
-use crate::ledger::{blockchain::Blockchain, transaction::{Transaction, TransactionType}};
-use serde::{Deserialize, Serialize};
 use crate::auction::auction_commands::AuctionCommand;
+use crate::ledger::{blockchain::Blockchain, transaction::{Transaction, TransactionType}};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuctionStatus {
@@ -11,10 +9,9 @@ pub enum AuctionStatus {
     Ended,    // Manually closed or expired
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Auction {
-    pub auction_id: String,
+    pub id: String,
     pub status: AuctionStatus,
     pub owner: Vec<u8>,
     pub title: String,
@@ -71,7 +68,7 @@ pub fn collect_auctions(transactions: &[Transaction]) -> HashMap<String, Auction
                 auctions.insert(
                     id.clone(),
                     Auction {
-                        auction_id: id,
+                        id,
                         status: AuctionStatus::Pending,
                         owner: tx.data.sender.clone(),
                         title,
@@ -103,8 +100,7 @@ pub fn collect_auctions(transactions: &[Transaction]) -> HashMap<String, Auction
             }
 
             AuctionCommand::Bid { id, amount } => {
-                    let Some(auction) = auctions.get_mut(&id) else { continue };
-
+                let Some(auction) = auctions.get_mut(&id) else { continue };
 
                 if auction.status != AuctionStatus::Active {
                     continue;
@@ -117,7 +113,7 @@ pub fn collect_auctions(transactions: &[Transaction]) -> HashMap<String, Auction
                 let is_active_period = match (auction.start_time, auction.end_time) {
                     (Some(start), None) => tx.data.timestamp >= start,
                     (Some(start), Some(end)) => tx.data.timestamp >= start && tx.data.timestamp <= end,
-                    _ => false, // Should theoretically never happen since status is Active
+                    _ => false,
                 };
             
                 if !is_active_period {
@@ -139,5 +135,3 @@ pub fn collect_auctions(transactions: &[Transaction]) -> HashMap<String, Auction
 
     auctions
 }
-
-
