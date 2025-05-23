@@ -3,7 +3,8 @@ use crate::kademlia::kademlia_proto::{FindNodeRequest, FindValueRequest, Node as
 use crate::kademlia::routing_table::RoutingTable;
 use ed25519_dalek::Keypair;
 use futures::stream::{FuturesUnordered, StreamExt};
-use rand::rngs::OsRng;
+use rand_chacha::ChaCha20Rng;
+use rand::SeedableRng;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -35,7 +36,15 @@ impl fmt::Display for Node {
 
 impl Node {
     pub fn new(address: SocketAddr) -> Self {
-        let keypair = Keypair::generate(&mut OsRng);
+        let mut hasher = Sha256::new();
+        hasher.update(address.to_string().as_bytes());
+        let hash = hasher.finalize();
+
+        let mut seed = [0u8; 32];
+        seed.copy_from_slice(&hash);
+
+        let mut rng = ChaCha20Rng::from_seed(seed);
+        let keypair = Keypair::generate(&mut rng);
         let hash = Sha256::digest(keypair.public.to_bytes());
         let id = hash[..ID_LENGTH].try_into().expect("SHA-256 hash length must be 160 bits (20 bytes)");
 
@@ -390,7 +399,15 @@ impl Node {
     }
 
     pub fn new_with_id(address: SocketAddr, id: [u8; ID_LENGTH]) -> Self {
-        let keypair = Keypair::generate(&mut OsRng);
+        let mut hasher = Sha256::new();
+        hasher.update(address.to_string().as_bytes());
+        let hash = hasher.finalize();
+
+        let mut seed = [0u8; 32];
+        seed.copy_from_slice(&hash);
+
+        let mut rng = ChaCha20Rng::from_seed(seed);
+        let keypair = Keypair::generate(&mut rng);
 
         Self {
             public_key: keypair.public.to_bytes(),

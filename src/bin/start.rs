@@ -9,7 +9,7 @@ use std::env;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
-    let default_port = 50051;
+    let default_port = 50050;
     let port: u16 = args.get(1)
         .map(|s| s.parse().expect("Invalid port"))
         .unwrap_or(default_port);
@@ -19,7 +19,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = Node::new(address);
 
     println!("[BOOTSTRAP] Listening on {}", address);
-    println!("[BOOTSTRAP] ID: {:02x?}", node.get_id());
 
     let service = KademliaService::new(node);
     Server::builder()

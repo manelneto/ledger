@@ -46,6 +46,14 @@ impl RoutingTable {
         None
     }
 
+    pub fn remove(&mut self, node: &Node) {
+        if let Some(index) = self.index(node.get_id()) {
+            if let Some(bucket) = self.buckets.get_mut(index) {
+                bucket.remove(node);
+            }
+        }
+    }
+
     pub fn replace_node(&mut self, lru: Node, node: Node) {
         if let Some(index) = self.index(lru.get_id()) {
             if let Some(bucket) = self.buckets.get_mut(index) {

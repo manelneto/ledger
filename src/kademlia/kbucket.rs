@@ -45,6 +45,12 @@ impl KBucket {
         self.nodes.push_back(node);
     }
 
+    pub fn remove(&mut self, node: &Node) {
+        if let Some(pos) = self.nodes.iter().position(|n| n.get_id() == node.get_id()) {
+            self.nodes.remove(pos);
+        }
+    }
+
     pub fn update(&mut self, node: Node) -> bool {
         if let Some(pos) = self.nodes.iter().position(|n| n.get_id() == node.get_id()) {
             self.nodes.remove(pos);

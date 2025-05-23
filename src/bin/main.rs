@@ -58,17 +58,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "1" => {
                 let port: u16 = prompt_parse("Target Port: ");
                 let target = Node::new(SocketAddr::new(ip, port));
-                let ok = node.ping(&target).await?;
-                println!("Alive: {}", ok);
+                match node.ping(&target).await {
+                    Ok(true) => println!("{} is alive!", target),
+                    _ => {
+                        println!("{} is not alive!", target);
+                        let routing_table_lock = node.get_routing_table();
+                        let mut routing_table = routing_table_lock.write().map_err(|_| {
+                            Status::internal("MAIN: failed to acquire lock on routing table")
+                        })?;
+                        routing_table.remove(&target);
+                    }
+                }
             }
             "2" => {
                 let key = prompt_hex("Key (40 hex chars): ");
                 let value = prompt("Value: ").into_bytes();
                 match key.try_into() {
-                    Ok(key_array) => {
-                        node.store(key_array, value).await?;
-                        println!("Stored");
-                    }
+                    Ok(key_array) => match node.store(key_array, value).await {
+                        Ok(_) => println!("STORE successful!"),
+                        Err(e) => println!("STORE error: {}", e),
+                    },
                     Err(_) => println!("Key must be exactly 40 hex characters (20 bytes)."),
                 }
             }
@@ -78,10 +87,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let target = Node::new(SocketAddr::new(ip, port));
                 match id.try_into() {
                     Ok(id_array) => {
-                        let nodes = node.find_node(target, id_array).await?;
-                        for n in nodes {
-                            println!("Node ID: {:02x?} @ {}", n.get_id(), n.get_address());
-                        }
+                        match node.find_node(target, id_array).await {
+                            Ok(nodes) => {
+                                println!("FIND_NODE successful!");
+                                for node in nodes {
+                                    println!("{}", node);
+                                }
+                            }
+                            Err(e) => println!("FIND_NODE error: {}", e),
+                        };
                     }
                     Err(_) => println!("ID must be exactly 40 hex characters (20 bytes)."),
                 }
@@ -92,15 +106,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let target = Node::new(SocketAddr::new(ip, port));
                 match key.try_into() {
                     Ok(key_array) => {
-                        let (value, nodes) = node.find_value(target, key_array).await?;
-                        match value {
-                            Some(v) => println!("Value: {:?}", String::from_utf8_lossy(&v)),
-                            None => {
+                        match node.find_value(target, key_array).await {
+                            Ok((Some(value), _)) => {
+                                println!("FIND_VALUE successful!");
+                                println!("Value: {:?}", String::from_utf8_lossy(&value));
+                            }
+                            Ok((None, nodes)) => {
                                 println!("Value not found. Closest nodes:");
-                                for n in nodes {
-                                    println!("Node ID: {:02x?} @ {}", n.get_id(), n.get_address());
+                                for node in nodes {
+                                    println!("{}", node);
                                 }
                             }
+                            Err(e) => println!("FIND_VALUE error: {}", e),
                         }
                     }
                     Err(_) => println!("Key must be exactly 40 hex characters (20 bytes)."),
