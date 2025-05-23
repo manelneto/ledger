@@ -1,6 +1,5 @@
 // src/ledger/transaction_pool.rs
-use std::collections::{HashMap, BTreeMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap, BTreeMap};
 use std::time::{Instant, Duration};
 use crate::ledger::transaction::{Transaction, TxHash, PublicKey, TransactionType, NonceTracker};
 
@@ -308,80 +307,5 @@ impl TransactionPool {
     // Get total memory usage of the pool
     pub fn total_memory_usage(&self) -> usize {
         self.total_size
-    }
-}
-
-// Thread-safe wrapper for transaction pool
-pub struct SharedTransactionPool {
-    pool: Arc<Mutex<TransactionPool>>,
-}
-
-impl SharedTransactionPool {
-    pub fn new() -> Self {
-        SharedTransactionPool {
-            pool: Arc::new(Mutex::new(TransactionPool::new())),
-        }
-    }
-
-    pub fn add_transaction(&self, tx: Transaction) -> Result<(), &'static str> {
-        let mut pool = self.pool.lock().unwrap();
-        pool.add_transaction(tx)
-    }
-
-    pub fn remove_transaction(&self, tx_hash: &TxHash) -> Option<Transaction> {
-        let mut pool = self.pool.lock().unwrap();
-        pool.remove_transaction(tx_hash)
-    }
-
-    pub fn get_transaction(&self, tx_hash: &TxHash) -> Option<Transaction> {
-        let pool = self.pool.lock().unwrap();
-        pool.get_transaction(tx_hash).cloned()
-    }
-
-    pub fn get_all_transactions(&self) -> Vec<Transaction> {
-        let pool = self.pool.lock().unwrap();
-        pool.get_all_transactions().into_iter().cloned().collect()
-    }
-
-    pub fn get_transactions_4_block(&self, max_size: usize) -> Vec<Transaction> {
-        let pool = self.pool.lock().unwrap();
-        pool.get_transactions_4_block(max_size)
-    }
-
-    // New methods for the secure version
-    pub fn get_transactions_for_block(&self, max_size: usize, max_gas: u64) -> Vec<Transaction> {
-        let pool = self.pool.lock().unwrap();
-        pool.get_transactions_for_block(max_size, max_gas)
-    }
-    
-    pub fn process_block(&self, transactions: &[Transaction]) {
-        let mut pool = self.pool.lock().unwrap();
-        pool.process_block(transactions);
-    }
-    
-    pub fn get_pending_by_sender(&self, sender: &PublicKey) -> Vec<Transaction> {
-        let pool = self.pool.lock().unwrap();
-        pool.get_pending_by_sender(sender)
-    }
-    
-    pub fn total_memory_usage(&self) -> usize {
-        let pool = self.pool.lock().unwrap();
-        pool.total_memory_usage()
-    }
-
-    pub fn size(&self) -> usize {
-        let pool = self.pool.lock().unwrap();
-        pool.size()
-    }
-
-    pub fn clear(&self) {
-        let mut pool = self.pool.lock().unwrap();
-        pool.clear();
-    }
-
-    pub fn clone(&self) -> Self {
-        SharedTransactionPool {
-            pool: Arc::clone(&self.pool),
-        }
     }
 }

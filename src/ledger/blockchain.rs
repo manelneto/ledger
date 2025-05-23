@@ -2,11 +2,11 @@
 use super::*;
 use std::vec;
 use std::collections::{HashMap, HashSet};
-use serde_json;
+//use serde_json;
 use crate::ledger::block::Block;
 use crate::ledger::lib::{now, BHash};
 use crate::ledger::transaction::{Transaction, PublicKey, TransactionType};
-use crate::ledger::transaction_pool::SharedTransactionPool;
+use crate::ledger::transaction_pool::TransactionPool;
 use std::time::{Duration, Instant};
 use crate::ledger::merkle_tree::{MerkleTree, MerkleProof};
 use ed25519_dalek::Keypair;
@@ -19,7 +19,7 @@ const MAX_FORK_DEPTH: usize = 6;
 
 pub struct Blockchain {
     pub blocks: Vec<Block>,
-    pub uncofirmed_transactions: SharedTransactionPool,
+    pub uncofirmed_transactions: TransactionPool,
     pub difficulty: usize,
     pub forks: HashMap<BHash, Vec<Block>>,
     pub balances: HashMap<Vec<u8>, u64>,
@@ -34,7 +34,7 @@ impl Blockchain {
     pub fn new() -> Self {
         let mut chain = Blockchain {
             blocks: Vec::new(),
-            uncofirmed_transactions: SharedTransactionPool::new(),
+            uncofirmed_transactions: TransactionPool::new(),
             difficulty: DIFFICULTY_PREFIX.len(),
             forks: HashMap::new(),
             balances: HashMap::new(),
@@ -222,7 +222,7 @@ impl Blockchain {
             None => return Err("Blockchain has no blocks"),
         };
 
-        // Use the secure method with gas limits
+        
         let transactions = self.uncofirmed_transactions.get_transactions_for_block(
             max_transactions * 500, // Assuming 500 bytes per tx on average
             1000000 // Gas limit
@@ -232,7 +232,7 @@ impl Blockchain {
             return Err("No valid transactions available");
         }
 
-        // Create a new block with the transactions
+        
         let mut new_block = Block::new(
             last_block.index + 1,
             now(),
@@ -582,6 +582,13 @@ impl Blockchain {
             calculated_root == block.merkle_root
         } else {
             block.merkle_root == vec![0; 32] && block.transactions.is_empty()
+        }
+    }
+
+    // Clear transactions that are now in blocks
+    pub fn cleanup_confirmed_transactions(&mut self, block: &Block) {
+        for tx in &block.transactions {
+            self.uncofirmed_transactions.remove_transaction(&tx.tx_hash);
         }
     }
 }
