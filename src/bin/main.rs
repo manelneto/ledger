@@ -2,6 +2,7 @@ use std::env;
 use std::io::{self, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
+use tonic::Status;
 use tonic::transport::Server;
 use blockchain::kademlia::kademlia_proto::kademlia_server::KademliaServer;
 use blockchain::kademlia::node::Node;
@@ -37,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     let bootstrap_node = Node::new(bootstrap_address);
-    node.join_with_pow(bootstrap_node.clone(), difficulty).await?;
+    node.join(bootstrap_node.clone(), difficulty).await?;
 
     loop {
         println!("\n=== MENU {} ===", address);
@@ -106,9 +107,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "5" => {
-                println!("ID: {:02x?}", node.get_id());
-                println!("IP: {}", node.get_address());
-                println!("Public Key: {:02x?}", node.get_public_key());
+                println!("I am {}", node);
+                let routing_table_lock = node.get_routing_table();
+                let routing_table = routing_table_lock.read().map_err(|_| {
+                    Status::internal("MAIN: failed to acquire lock on routing table")
+                })?;
+                println!("{}", *routing_table);
             }
             _ => println!("Invalid option."),
         }

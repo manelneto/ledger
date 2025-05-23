@@ -42,10 +42,14 @@ impl Kademlia for KademliaService {
     async fn ping(&self, request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
         let sender = request.into_inner().sender;
 
-        println!("PING from: {:?}", sender);
+        if let Some(ref proto) = sender {
+            if let Some(node) = Node::from_sender(proto) {
+                println!("PING from: {}", node);
+            }
 
-        if let Some(ref node) = sender {
-            self.update_routing_table(node).await;
+            if let Some(ref node) = sender {
+                self.update_routing_table(node).await;
+            }
         }
 
         Ok(Response::new(PingResponse {
@@ -56,10 +60,14 @@ impl Kademlia for KademliaService {
     async fn store(&self, request: Request<StoreRequest>) -> Result<Response<StoreResponse>, Status> {
         let StoreRequest { sender, key, value } = request.into_inner();
 
-        println!("STORE from: {:?}", sender);
+        if let Some(ref proto) = sender {
+            if let Some(node) = Node::from_sender(proto) {
+                println!("STORE from: {}", node);
+            }
 
-        if let Some(ref node) = sender {
-            self.update_routing_table(node).await;
+            if let Some(ref node) = sender {
+                self.update_routing_table(node).await;
+            }
         }
 
         let key: [u8; KEY_LENGTH] = key.try_into().map_err(|_| {
@@ -80,10 +88,14 @@ impl Kademlia for KademliaService {
     async fn find_node(&self, request: Request<FindNodeRequest>) -> Result<Response<FindNodeResponse>, Status> {
         let FindNodeRequest { sender, id } = request.into_inner();
 
-        println!("FIND_NODE from: {:?}", sender);
+        if let Some(ref proto) = sender {
+            if let Some(node) = Node::from_sender(proto) {
+                println!("FIND_NODE from: {}", node);
+            }
 
-        if let Some(ref node) = sender {
-            self.update_routing_table(node).await;
+            if let Some(ref node) = sender {
+                self.update_routing_table(node).await;
+            }
         }
 
         let id: [u8; ID_LENGTH] = id.try_into().map_err(|_| {
@@ -103,10 +115,14 @@ impl Kademlia for KademliaService {
     async fn find_value(&self, request: Request<FindValueRequest>) -> Result<Response<FindValueResponse>, Status> {
         let FindValueRequest { sender, key } = request.into_inner();
 
-        println!("FIND_VALUE from: {:?}", sender);
+        if let Some(ref proto) = sender {
+            if let Some(node) = Node::from_sender(proto) {
+                println!("FIND_VALUE from: {}", node);
+            }
 
-        if let Some(ref node) = sender {
-            self.update_routing_table(node).await;
+            if let Some(ref node) = sender {
+                self.update_routing_table(node).await;
+            }
         }
 
         let key: [u8; KEY_LENGTH] = key.try_into().map_err(|_| {
@@ -142,27 +158,29 @@ impl Kademlia for KademliaService {
 
     async fn join(&self, request: Request<JoinRequest>) -> Result<Response<JoinResponse>, Status> {
         let JoinRequest { sender, nonce, pow_hash } = request.into_inner();
-        
-        let sender_node = match Node::from_sender(&sender.ok_or(Status::invalid_argument("No sender provided"))?) {
-            Some(node) => node,
-            None => return Err(Status::invalid_argument("Invalid sender node")),
+
+        let sender_proto = sender.ok_or(Status::invalid_argument("JOIN: no sender provided"))?;
+
+        let sender = match Node::from_sender(&sender_proto) {
+            Some(node) => {
+                println!("JOIN from: {}", node);
+                node
+            }
+            None => return Err(Status::invalid_argument("JOIN: invalid sender")),
         };
 
-        if !self.node.verify_pow(sender_node.get_id(), &nonce, &pow_hash, DIFFICULTY_POW) { 
-            return Err(Status::permission_denied("Invalid PoW proof"));
+        if !self.node.verify_pow(sender.get_id(), &nonce, &pow_hash, DIFFICULTY_POW) {
+            return Err(Status::permission_denied("JOIN: invalid Proof-of-Work"));
         }
 
-        self.update_routing_table(&sender_node.to_send()).await;
-
-        let routing_table_lock = self.node.get_routing_table();
-        let routing_table = routing_table_lock.read().map_err(|_| {
-            Status::internal("Failed to acquire lock on routing table")
-        })?;
+        self.update_routing_table(&sender.to_send()).await;
 
         let closest_nodes = {
-            let table = self.node.get_routing_table();
-            let unwrap_table = table.read().unwrap();
-            let mut nodes = unwrap_table.find_closest_nodes(sender_node.get_id(), K)
+            let routing_table_lock = self.node.get_routing_table();
+            let routing_table = routing_table_lock.write().map_err(|_| {
+                Status::internal("JOIN: failed to acquire lock on routing table")
+            })?;
+            let mut nodes = routing_table.find_closest_nodes(sender.get_id(), K)
                 .into_iter()
                 .map(|n| n.to_send())
                 .collect::<Vec<_>>();
@@ -180,4 +198,3 @@ impl Kademlia for KademliaService {
         }))
     }
 }
-

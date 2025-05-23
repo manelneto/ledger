@@ -1,11 +1,23 @@
 use crate::kademlia::constants::{ID_LENGTH, N_BUCKETS};
 use crate::kademlia::kbucket::KBucket;
 use crate::kademlia::node::Node;
-use std::array;
+use std::{array, fmt};
 
 pub struct RoutingTable {
     id: [u8; ID_LENGTH],
     buckets: Vec<KBucket>,
+}
+
+impl fmt::Display for RoutingTable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Routing Table:")?;
+        for bucket in &self.buckets {
+            if bucket.get_nodes().next().is_some() {
+                writeln!(f, "  - {}", bucket)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl RoutingTable {
@@ -17,7 +29,7 @@ impl RoutingTable {
     }
 
     pub fn find_closest_nodes(&self, id: &[u8; ID_LENGTH], k: usize) -> Vec<Node> {
-        let mut nodes: Vec<Node> = self.buckets.iter().flat_map(|bucket| bucket.get_all_nodes()).collect();
+        let mut nodes: Vec<Node> = self.buckets.iter().flat_map(|bucket| bucket.get_nodes()).collect();
         nodes.sort_by_key(|node| Self::xor_distance(id, node.get_id()));
         nodes.into_iter().take(k).collect()
     }

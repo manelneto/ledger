@@ -39,10 +39,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     println!("Node 1 joining network...");
-    node1.join_with_pow(bootstrap_node.clone(), 2).await?;
+    node1.join(bootstrap_node.clone(), 2).await?;
 
     println!("Node 2 joining network...");
-    node2.join_with_pow(bootstrap_node.clone(), 2).await?;
+    node2.join(bootstrap_node.clone(), 2).await?;
 
     println!(" Network State:");
     print_routing_table("Bootstrap", &bootstrap_node).await;

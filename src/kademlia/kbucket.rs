@@ -1,9 +1,20 @@
 use crate::kademlia::constants::K;
 use crate::kademlia::node::Node;
 use std::collections::VecDeque;
+use std::fmt;
 
 pub struct KBucket {
     nodes: VecDeque<Node>,
+}
+
+impl fmt::Display for KBucket {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "KBucket:")?;
+        for node in &self.nodes {
+            writeln!(f, "    - {}", node)?;
+        }
+        Ok(())
+    }
 }
 
 impl KBucket {
@@ -17,7 +28,7 @@ impl KBucket {
         self.nodes.iter().any(|n| n.get_id() == node.get_id())
     }
 
-    pub fn get_all_nodes(&self) -> impl Iterator<Item = Node> + '_ {
+    pub fn get_nodes(&self) -> impl Iterator<Item = Node> + '_ {
         self.nodes.iter().cloned()
     }
 

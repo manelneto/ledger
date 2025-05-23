@@ -6,6 +6,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -24,6 +25,12 @@ pub struct Node {
     address: SocketAddr,
     routing_table: Arc<RwLock<RoutingTable>>,
     storage: Arc<RwLock<HashMap<[u8; KEY_LENGTH], Vec<u8>>>>,
+}
+
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Node ID = {} @ {}", hex::encode(self.id), self.address)
+    }
 }
 
 impl Node {
@@ -87,12 +94,16 @@ impl Node {
     pub async fn bootstrap(&self, bootstrap_node: Node) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
 
+        println!("BOOTSTRAP: sending FIND_NODE request to boostrap node ({})...", bootstrap_node);
+
         let request = Request::new(FindNodeRequest {
             sender: Some(self.to_send()),
             id: self.id.to_vec(),
         });
 
         let response = client.find_node(request).await?.into_inner();
+
+        println!("BOOTSTRAP: received FIND_NODE response from boostrap node ({})!", bootstrap_node);
 
         let mut routing_table = self.routing_table.write().map_err(|_| {
             Status::internal("BOOTSTRAP: failed to acquire lock on routing table")
@@ -104,7 +115,8 @@ impl Node {
             }
         }
 
-        println!("BOOTSTRAP: OK");
+        println!("BOOTSTRAP: successfully updated routing table.");
+        println!("{}", routing_table);
 
         Ok(())
     }
@@ -113,6 +125,8 @@ impl Node {
         let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
         for _ in 0..TRIES {
+            println!("PING: sending PING request to {}...", target);
+
             let request = Request::new(PingRequest {
                 sender: Some(self.to_send()),
             });
@@ -120,10 +134,12 @@ impl Node {
             let result = timeout(Duration::from_millis(TIMEOUT), client.ping(request)).await;
 
             if let Ok(Ok(response)) = result {
+                println!("PING: received PING response from {}!", target);
                 return Ok(response.into_inner().alive);
             }
         }
 
+        println!("PING: did not receive PING response from {}!", target);
         Ok(false)
     }
 
@@ -146,6 +162,8 @@ impl Node {
     pub async fn store_at(&self, target: &Node, key: [u8; KEY_LENGTH], value: Vec<u8>) -> Result<bool, Box<dyn std::error::Error>> {
         let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
+        println!("STORE: sending STORE request to {}...", target);
+
         let request = Request::new(StoreRequest {
             sender: Some(self.to_send()),
             key: key.to_vec(),
@@ -154,6 +172,8 @@ impl Node {
 
         let response = client.store(request).await?.into_inner();
 
+        println!("STORE: received STORE response from {}!", target);
+
         Ok(response.success)
     }
 
@@ -161,12 +181,16 @@ impl Node {
     pub async fn find_node(&self, target: Node, id: [u8; ID_LENGTH]) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
         let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
+        println!("FIND_NODE: sending FIND_NODE request to {}...", target);
+
         let request = Request::new(FindNodeRequest {
             sender: Some(self.to_send()),
             id: id.to_vec(),
         });
 
         let response = client.find_node(request).await?.into_inner();
+
+        println!("FIND_NODE: received FIND_NODE response from {}!", target);
 
         let nodes = response.nodes
             .into_iter()
@@ -178,6 +202,8 @@ impl Node {
 
     pub async fn find_value(&self, target: Node, key: [u8; KEY_LENGTH]) -> Result<(Option<Vec<u8>>, Vec<Node>), Box<dyn std::error::Error>> {
         let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
+
+        println!("FIND_VALUE: sending FIND_VALUE request to {}...", target);
 
         let request = Request::new(FindValueRequest {
             sender: Some(self.to_send()),
@@ -192,7 +218,67 @@ impl Node {
             .filter_map(|proto| Node::from_sender(&proto))
             .collect();
 
+        println!("FIND_VALUE: received FIND_VALUE response from {}!", target);
+
         Ok((value, nodes))
+    }
+
+    pub async fn join(&self, bootstrap_node: Node, difficulty: usize) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.ping(&bootstrap_node).await? {
+            return Err("JOIN: error pinging boostrap node!".into());
+        }
+
+        let (nonce, pow_hash) = self.generate_pow(difficulty).await;
+
+        println!("JOIN: sending JOIN request to bootstrap node ({})...", bootstrap_node);
+
+        let mut client = KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
+
+        let request = Request::new(JoinRequest {
+            sender: Some(self.to_send()),
+            nonce: nonce.to_vec(),
+            pow_hash: pow_hash.to_vec(),
+        });
+
+        let response = client.join(request).await?.into_inner();
+
+        println!("JOIN: received JOIN response from bootstrap node ({})!", bootstrap_node);
+
+        if !response.accepted {
+            return Err("JOIN: request rejected by bootstrap node!".into());
+        }
+
+        let routing_table_lock = self.routing_table.clone();
+        let ping_futures = response.closest_nodes
+            .into_iter()
+            .filter_map(|proto| {
+                let node = Node::from_sender(&proto)?;
+                (node.get_id() != self.get_id()).then_some(node)
+            })
+            .map(move |node| {
+                let routing_table_lock = routing_table_lock.clone();
+                async move {
+                    match tokio::time::timeout(Duration::from_secs(5), self.ping(&node)).await {
+                        Ok(Ok(true)) => {
+                            match routing_table_lock.write() {
+                                Ok(mut routing_table) => {
+                                    routing_table.update(node.clone());
+                                    println!("JOIN: successfully pinged {}, so updated routing table.", node);
+                                }
+                                Err(_) => {
+                                    println!("JOIN: failed to acquire lock on routing table.");
+                                }
+                            }
+                        }
+                        _ => println!("JOIN: failed to ping {}, so did not update routing table.", node),
+                    }
+                }
+            });
+
+        futures::future::join_all(ping_futures).await;
+
+        println!("JOIN: successfully joined the network.");
+        Ok(())
     }
 
     pub async fn iterative_find_node(&self, target: [u8; ID_LENGTH]) -> Vec<Node> {
@@ -298,7 +384,7 @@ impl Node {
             .serve(self.address)
             .await?;
 
-        println!("NODE START: {}", self.address);
+        println!("START: started {}!", self);
 
         Ok(())
     }
@@ -316,59 +402,7 @@ impl Node {
         }
     }
 
-    pub async fn join_with_pow(&self, bootstrap_node: Node, difficulty: usize) -> Result<(), Box<dyn std::error::Error>> {
-
-        if !self.ping(&bootstrap_node).await? {
-            return Err("Could not ping bootstrap node".into());
-        }
-    
-        let (nonce, pow_hash) = self.generate_pow(difficulty).await;
-    
-        let mut client = KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
-        let response = client.join(Request::new(JoinRequest {
-            sender: Some(self.to_send()),
-            nonce: nonce.to_vec(),
-            pow_hash: pow_hash.to_vec(),
-        })).await?.into_inner();
-    
-        if !response.accepted {
-            return Err("Join request rejected by bootstrap node".into());
-        }
-    
-        let mut routing_table = self.routing_table.write().map_err(|_| {
-            Status::internal("JOIN: failed to acquire lock on routing table")
-        })?;
-    
-        let ping_futures = response.closest_nodes
-            .into_iter()
-            .filter_map(|proto| {
-                let node = Node::from_sender(&proto)?;
-                // Skip self and invalid nodes
-                (node.get_id() != self.get_id()).then(|| {
-                    routing_table.update(node.clone());
-                    node
-                })
-            })
-            .map(|node| async move {
-                match tokio::time::timeout(
-                    Duration::from_secs(5),
-                    self.ping(&node)
-                ).await {
-                    Ok(Ok(true)) => println!(" Successfully pinged {}", node.get_address()),
-                    Ok(Ok(false)) => println!(" Ping failed to {}", node.get_address()),
-                    Ok(Err(e)) => println!(" Ping error to {}: {}", node.get_address(), e),
-                    Err(_) => println!(" Ping timeout to {}", node.get_address()),
-                }
-            });
-    
-        futures::future::join_all(ping_futures).await;
-    
-        println!(" JOIN: Successfully joined the network");
-        Ok(())
-    }
-
     async fn generate_pow(&self, difficulty: usize) -> ([u8; 8], [u8; 32]) {
-    
         let mut nonce: u64 = 0;
         let target_prefix = vec![0u8; difficulty];
     
@@ -390,7 +424,6 @@ impl Node {
     }
 
     pub fn verify_pow(&self, node_id: &[u8], nonce: &[u8], pow_hash: &[u8], difficulty: usize) -> bool {
-
         let mut input = Vec::new();
         input.extend_from_slice(node_id);
         input.extend_from_slice(nonce);
@@ -399,8 +432,6 @@ impl Node {
         hasher.update(&input);
         let computed_hash = hasher.finalize();
         
-        computed_hash[..difficulty] == vec![0u8; difficulty][..] && 
-        computed_hash.as_slice() == pow_hash
+        computed_hash[..difficulty] == vec![0u8; difficulty][..] && computed_hash.as_slice() == pow_hash
     }
-
 }
