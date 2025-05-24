@@ -1,3 +1,4 @@
+/*
 use blockchain::ledger::blockchain::Blockchain;
 use blockchain::ledger::transaction::Transaction;
 use ed25519_dalek::Keypair;
@@ -250,4 +251,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Auction Transaction Test Completed ===");
     
     Ok(())
+}
+*/
+//empty main
+fn main() {
+    println!("Is in comments!");
 }

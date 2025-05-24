@@ -15,7 +15,7 @@ const MIN_BLOCK_TIME: u128 = 1_000; // 1 second
 const MAX_MINING_TIME: Duration = Duration::from_secs(300);
 const MAX_FORK_DEPTH: usize = 6;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Blockchain {
     pub blocks: Vec<Block>,
     pub difficulty: usize,
