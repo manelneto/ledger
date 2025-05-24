@@ -3,9 +3,10 @@ use std::vec;
 use crate::ledger::lib::{u128_to_bytes, u32_to_bytes, u64_to_bytes, BHash};
 use crate::ledger::transaction::Transaction;
 use crate::ledger::merkle_tree::MerkleTree;
+use serde::{Serialize, Deserialize};
 use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Block {
     pub index: u32,
     pub timestamp: u128,
@@ -87,7 +88,7 @@ impl Block{
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockHeader {
     pub index: u32,
     pub timestamp: u128,
