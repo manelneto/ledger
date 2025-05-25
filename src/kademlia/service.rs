@@ -1,6 +1,8 @@
+use std::sync::Arc;
+use tokio::sync::Notify;
 use crate::kademlia::constants::{ID_LENGTH, K, KEY_LENGTH};
 use crate::kademlia::kademlia_proto::kademlia_server::Kademlia;
-use crate::kademlia::kademlia_proto::{Node as ProtoNode, PingRequest, PingResponse, StoreRequest, StoreResponse, FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse, JoinRequest, JoinResponse};
+use crate::kademlia::kademlia_proto::{Node as ProtoNode, PingRequest, PingResponse, StoreRequest, StoreResponse, FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse, JoinRequest, JoinResponse, ShutdownRequest, ShutdownResponse};
 use crate::kademlia::node::{Node, BlockchainMessage};
 use tonic::{Request, Response, Status};
 
@@ -8,11 +10,22 @@ static DIFFICULTY_POW: usize = 2;
 
 pub struct KademliaService {
     node: Node,
+    shutdown: Arc<Notify>,
 }
 
 impl KademliaService {
     pub fn new(node: Node) -> Self {
-        Self { node }
+        Self {
+            node,
+            shutdown: Arc::new(Notify::new()),
+        }
+    }
+
+    pub fn new_with_shutdown(node: Node, shutdown: Arc<Notify>) -> Self {
+        Self {
+            node,
+            shutdown,
+        }
     }
 
     async fn update_routing_table(&self, sender: &ProtoNode) {
@@ -236,5 +249,10 @@ impl Kademlia for KademliaService {
             accepted: true,
             closest_nodes,
         }))
+    }
+
+    async fn shutdown(&self, _request: Request<ShutdownRequest>) -> Result<Response<ShutdownResponse>, Status> {
+        self.shutdown.notify_one();
+        Ok(Response::new(ShutdownResponse {}))
     }
 }
