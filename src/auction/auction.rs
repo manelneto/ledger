@@ -22,6 +22,7 @@ pub struct Auction {
     pub highest_bid: Option<(u64, Vec<u8>)>,
 }
 
+#[allow(dead_code)]
 fn find_auction_transactions(blockchain: &Blockchain) -> Vec<&Transaction> {
     let mut auction_txs = Vec::new();
     

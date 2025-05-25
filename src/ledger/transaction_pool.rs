@@ -68,8 +68,6 @@ impl TransactionPool {
 
         // Validate nonce sequence
         if let Some(sender_txs) = self.by_sender.get(sender) {
-            let expected_nonce = self.nonce_tracker.get_nonce(sender) + 1;
-            
             // Check for gaps in nonce sequence
             if let Some((&highest_nonce, _)) = sender_txs.last_key_value() {
                 if tx.data.nonce > highest_nonce + 1 {

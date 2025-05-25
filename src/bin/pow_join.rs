@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node1 = Node::new("127.0.0.1:50052".parse()?);
     let node2 = Node::new("127.0.0.1:50053".parse()?);
 
-    let (shutdown_send, shutdown_recv) = oneshot::channel();
+    let (shutdown_send, _shutdown_recv) = oneshot::channel();
     
     let bootstrap_handle = tokio::spawn({
         let node = bootstrap_node.clone();

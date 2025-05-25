@@ -1,22 +1,33 @@
 use crate::kademlia::constants::{ALPHA, CRYPTO_KEY_LENGTH, ID_LENGTH, KEY_LENGTH, K, TIMEOUT, TRIES};
 use crate::kademlia::kademlia_proto::{FindNodeRequest, FindValueRequest, Node as ProtoNode, PingRequest, StoreRequest, JoinRequest};
 use crate::kademlia::routing_table::RoutingTable;
-use ed25519_dalek::Keypair;
+use crate::ledger::blockchain::Blockchain;
+use crate::ledger::block::Block;
+use crate::ledger::transaction::{Transaction, TransactionType};
+use crate::ledger::transaction_pool::TransactionPool;
+use ed25519_dalek::{Keypair, PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use futures::stream::{FuturesUnordered, StreamExt};
-use rand_chacha::ChaCha20Rng;
-use rand::SeedableRng;
+use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt;
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Mutex};
 use std::time::Duration;
-use tokio::time::timeout;
+use tokio::time::{timeout, interval};
 use tonic::{Request, Status};
 use tonic::transport::Server;
 use crate::kademlia::kademlia_proto::kademlia_client::KademliaClient;
 use crate::kademlia::kademlia_proto::kademlia_server::KademliaServer;
 use crate::kademlia::service::KademliaService;
+use serde::{Serialize, Deserialize};
+use std::fmt;
+
+
+// Constants for blockchain operations
+const BLOCK_INTERVAL: Duration = Duration::from_secs(30);
+const SYNC_INTERVAL: Duration = Duration::from_secs(60);
+const MAX_TRANSACTIONS_PER_BLOCK: usize = 10;
+const MAX_NODES_TO_SYNC: usize = 3;
 
 #[derive(Clone)]
 pub struct Node {
@@ -26,6 +37,9 @@ pub struct Node {
     address: SocketAddr,
     routing_table: Arc<RwLock<RoutingTable>>,
     storage: Arc<RwLock<HashMap<[u8; KEY_LENGTH], Vec<u8>>>>,
+    blockchain: Arc<RwLock<Blockchain>>,
+    transaction_pool: Arc<Mutex<TransactionPool>>,
+    is_mining: Arc<RwLock<bool>>,
 }
 
 impl fmt::Display for Node {
@@ -34,17 +48,21 @@ impl fmt::Display for Node {
     }
 }
 
+// Message types for blockchain sync
+#[derive(Serialize, Deserialize, Clone)]
+pub enum BlockchainMessage {
+    RequestFullBlockchain,
+    ResponseFullBlockchain { blockchain: Blockchain },
+    ResponseBlocks { blocks: Vec<Block> },
+    NewBlock { block: Block },
+    NewTransaction { transaction: Transaction },
+    RequestTransactionPool,
+    ResponseTransactionPool { transactions: Vec<Transaction> },
+}
+
 impl Node {
     pub fn new(address: SocketAddr) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(address.to_string().as_bytes());
-        let hash = hasher.finalize();
-
-        let mut seed = [0u8; 32];
-        seed.copy_from_slice(&hash);
-
-        let mut rng = ChaCha20Rng::from_seed(seed);
-        let keypair = Keypair::generate(&mut rng);
+        let keypair = Keypair::generate(&mut OsRng);
         let hash = Sha256::digest(keypair.public.to_bytes());
         let id = hash[..ID_LENGTH].try_into().expect("SHA-256 hash length must be 160 bits (20 bytes)");
 
@@ -55,7 +73,34 @@ impl Node {
             address,
             routing_table: Arc::new(RwLock::new(RoutingTable::new(id))),
             storage: Arc::new(RwLock::new(HashMap::new())),
+            blockchain: Arc::new(RwLock::new(Blockchain::new())),
+            transaction_pool: Arc::new(Mutex::new(TransactionPool::new())),
+            is_mining: Arc::new(RwLock::new(false)),
         }
+    }
+
+    pub fn new_with_id(address: SocketAddr, id: [u8; ID_LENGTH]) -> Self {
+        let keypair = Keypair::generate(&mut OsRng);
+
+        Self {
+            public_key: keypair.public.to_bytes(),
+            private_key: keypair.secret.to_bytes(),
+            id,
+            address,
+            routing_table: Arc::new(RwLock::new(RoutingTable::new(id))),
+            storage: Arc::new(RwLock::new(HashMap::new())),
+            blockchain: Arc::new(RwLock::new(Blockchain::new())),
+            transaction_pool: Arc::new(Mutex::new(TransactionPool::new())),
+            is_mining: Arc::new(RwLock::new(false)),
+        }
+    }
+
+    fn get_keypair(&self) -> Result<Keypair, &'static str> {
+        let secret = DalekSecretKey::from_bytes(&self.private_key)
+            .map_err(|_| "Invalid private key")?;
+        let public = DalekPublicKey::from_bytes(&self.public_key)
+            .map_err(|_| "Invalid public key")?;
+        Ok(Keypair { secret, public })
     }
 
     pub fn get_public_key(&self) -> &[u8; CRYPTO_KEY_LENGTH] {
@@ -78,9 +123,384 @@ impl Node {
         self.storage.clone()
     }
 
+    pub fn get_blockchain(&self) -> Arc<RwLock<Blockchain>> {
+        self.blockchain.clone()
+    }
+
+    pub fn get_transaction_pool(&self) -> Arc<Mutex<TransactionPool>> {
+        self.transaction_pool.clone()
+    }
+
+    pub async fn create_transaction(
+        &self,
+        receiver: Option<Vec<u8>>,
+        tx_type: TransactionType,
+        amount: Option<u64>,
+        data: Option<String>,
+    ) -> Result<Transaction, &'static str>{
+        let blockchain = self.blockchain.read().unwrap();
+        let sender = self.public_key.to_vec();
+        let nonce = blockchain.get_next_nonce(&sender);
+
+        let fee = match tx_type {
+            TransactionType::Transfer => 1000,
+            TransactionType::Data => 500,
+        };
+
+        let tx_data = crate::ledger::transaction::TransactionData{
+            sender: sender.clone(),
+            receiver,
+            timestamp: crate::ledger::lib::now(),
+            tx_type,
+            amount,
+            data,
+            nonce,
+            fee,
+            valid_until: Some(crate::ledger::lib::now() + 3_600_000),
+        };
+
+        let keypair = self.get_keypair()?;
+        let tx = Transaction::create_signed(tx_data, &keypair);
+        Ok(tx)
+    }
+
+    pub async fn submit_transaction(&self, tx: Transaction) -> Result<(), &'static str>{
+        if !tx.verify(){
+            return Err("Invalid transaction signature");
+        }
+
+        {
+            let mut pool = self.transaction_pool.lock().unwrap();
+            pool.add_transaction(tx.clone())?;
+        }
+
+        self.broadcast_transaction(tx).await;
+        Ok(())
+    }
+
+    async fn broadcast_transaction(&self, tx: Transaction){
+        let message = BlockchainMessage::NewTransaction { transaction: tx.clone() };
+        let data = serde_json::to_vec(&message).unwrap_or_default();
+
+        let key = tx.tx_hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH]);
+        self.store(key, data).await.unwrap_or(());
+    }
+
+    pub async fn mine_block(&self) -> Result<Block, &'static str>{
+        {
+            let mut mining = self.is_mining.write().unwrap();
+            if *mining{
+                return Err("Already Mining");
+            }
+            *mining = true;
+        }
+
+        let result = self.mine_pow_block().await;
+
+        {
+            let mut mining = self.is_mining.write().unwrap();
+            *mining = false;
+        }
+
+        result
+    }
+
+    async fn mine_pow_block(&self) -> Result<Block, &'static str>{
+        let transactions = {
+            let pool = self.transaction_pool.lock().unwrap();
+            pool.get_transactions_for_block(MAX_TRANSACTIONS_PER_BLOCK, 1_000_000)
+        };
+
+        let mut block = {
+            let blockchain = self.blockchain.read().unwrap();
+            blockchain.create_block(transactions)?
+        };
+
+        // Mine Block (Proof of Work)
+        {
+            let blockchain = self.blockchain.read().unwrap();
+            blockchain.mine_block(&mut block)?;
+        }
+
+        {
+            let mut blockchain = self.blockchain.write().unwrap();
+            blockchain.add_block(block.clone())?;
+        }
+
+        {
+            let mut pool = self.transaction_pool.lock().unwrap();
+            pool.process_block(&block.transactions);
+        }
+
+        self.broadcast_block(block.clone()).await;
+
+        Ok(block)
+    }
+
+    async fn broadcast_block(&self, block: Block){
+        println!("Broadcasting new block {} to network", block.index);
+        let message = BlockchainMessage::NewBlock { block: block.clone() };
+        let data = serde_json::to_vec(&message).unwrap_or_default();
+
+        let nodes = {
+            let routing_table = self.routing_table.read().unwrap();
+            routing_table.find_closest_nodes(self.get_id(), K)
+        };
+
+        let mut broadcast_futures = FuturesUnordered::new();
+
+         for node in nodes {
+            if node.get_id() != self.get_id() {
+                let data_clone = data.clone();
+                let key = block.hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH]);
+                
+                broadcast_futures.push(async move {
+                    match timeout(Duration::from_secs(5), self.store_at(&node, key, data_clone)).await {
+                        Ok(Ok(_)) => println!("Successfully broadcast block to {}", node.get_address()),
+                        Ok(Err(e)) => println!("Failed to broadcast block to {}: {}", node.get_address(), e),
+                        Err(_) => println!("Timeout broadcasting block to {}", node.get_address()),
+                    }
+                });
+            }
+        }
+
+        let mut completed = 0;
+        while let Some(_) = broadcast_futures.next().await {
+            completed += 1;
+        }
+
+        println!("Broadcasted block to {} nodes", completed);
+    }
+
+    pub async fn sync_blockchain(&self) {
+        println!("Starting blockchain sync...");
+
+        let current_height = {
+            let blockchain = self.blockchain.read().unwrap();
+            blockchain.get_block_height()
+        };
+        println!("Current blockchain height: {}", current_height);
+
+        let nodes = {
+            let routing_table = self.routing_table.read().unwrap();
+            routing_table.find_closest_nodes(self.get_id(), K)
+        };
+
+        if nodes.is_empty() {
+            println!("No nodes found for blockchain sync.");
+            return;
+        }
+
+        let mut sync_futures = FuturesUnordered::new();
+
+        for node in nodes.iter().take(MAX_NODES_TO_SYNC) {
+            if node.get_id() != self.get_id() {
+                sync_futures.push(self.request_full_blockchain(node.clone()));
+            }
+        }
+
+        let mut best_blockchain: Option<Blockchain> = None;
+        let mut best_height = current_height;
+
+        while let Some(result) = sync_futures.next().await {
+            match result {
+                Ok(blockchain) => {
+                    let height = blockchain.get_block_height();
+                    println!("Received blockchain with height: {}", height);
+                
+                    // Accept ANY blockchain that's valid, even if same height (to sync genesis)
+                    if blockchain.is_chain_valid(None) && (height > best_height || best_blockchain.is_none()) {
+                        best_height = height;
+                        best_blockchain = Some(blockchain);
+                        println!("Found blockchain with height {}", height);
+                    }
+                }
+                Err(e) => {
+                    println!("Error syncing from node: {}", e);
+                }
+            }
+        }
+
+        if let Some(blockchain) = best_blockchain {
+            let mut current_blockchain = self.blockchain.write().unwrap();
+            *current_blockchain = blockchain;
+            println!("Successfully synced blockchain with height {}", best_height);
+
+            let mut pool = self.transaction_pool.lock().unwrap();
+            pool.clear(); // Clear the transaction pool after sync
+        } else {
+            println!("No blockchain found during sync.");
+        }
+    }
+
+    async fn request_full_blockchain(&self, node: Node) -> Result<Blockchain, Box<dyn std::error::Error>> {
+        println!("Requesting full blockchain from {}", node.get_address());
+        
+        let message = BlockchainMessage::RequestFullBlockchain;
+        let request_data = serde_json::to_vec(&message)?;
+        
+        // Use a unique key for blockchain requests
+        let request_key = {
+            let mut hasher = Sha256::new();
+            hasher.update(b"blockchain_request");
+            hasher.update(&self.id);
+            hasher.update(&crate::ledger::lib::now().to_be_bytes());
+            let hash = hasher.finalize();
+            hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH])
+        };
+
+        // Store the request
+        self.store_at(&node, request_key, request_data).await?;
+        
+        // Wait a bit and then try to retrieve the response
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        
+        let (response_data, _) = self.find_value(node, request_key).await?;
+        
+        if let Some(data) = response_data {
+            if let Ok(message) = serde_json::from_slice::<BlockchainMessage>(&data) {
+                match message {
+                    BlockchainMessage::ResponseFullBlockchain { blockchain } => {
+                        println!("Received full blockchain with {} blocks", blockchain.get_block_height());
+                        return Ok(blockchain);
+                    }
+                    _ => return Err("Unexpected message type".into()),
+                }
+            }
+        }
+        
+        Err("Failed to receive blockchain response".into())
+    }
+
+    pub async fn handle_blockchain_message(&self, data: &[u8]) -> Option<Vec<u8>> {
+        if let Ok(message) = serde_json::from_slice::<BlockchainMessage>(data) {
+            match message {
+                BlockchainMessage::RequestFullBlockchain => {
+                    println!("Received request for full blockchain");
+                    let blockchain = self.blockchain.read().unwrap().clone();
+                    let response = BlockchainMessage::ResponseFullBlockchain { blockchain };
+                    return serde_json::to_vec(&response).ok();
+                }
+            
+                BlockchainMessage::NewBlock { block } => {
+                    println!("Received new block: {}", block.index);
+                    if let Err(e) = self.receive_new_block(block).await {
+                        println!("Failed to process new block: {}", e);
+                    }
+                }
+            
+                BlockchainMessage::NewTransaction { transaction } => {
+                    println!("Received new transaction: {}", hex::encode(&transaction.tx_hash[..8]));
+                    if let Err(e) = self.receive_new_transaction(transaction).await {
+                        println!("Failed to process new transaction: {}", e);
+                    }
+                }
+            
+                BlockchainMessage::ResponseFullBlockchain { blockchain } => {
+                    // NEW: Handle blockchain response by replacing current blockchain
+                    println!("Received blockchain response with {} blocks", blockchain.get_block_height());
+                    let current_height = {
+                        let current_blockchain = self.blockchain.read().unwrap();
+                        current_blockchain.get_block_height()
+                    };
+                
+                    if blockchain.get_block_height() > current_height && blockchain.is_chain_valid(None) {
+                        let mut our_blockchain = self.blockchain.write().unwrap();
+                        *our_blockchain = blockchain;
+                        println!("Replaced blockchain with {} blocks", our_blockchain.get_block_height());
+                    }
+                }   
+            
+                _ => {}
+            }
+        }
+        None
+    }
+
+    async fn receive_new_block(&self, block: Block) -> Result<(), &'static str> {
+        let mut blockchain = self.blockchain.write().unwrap();
+        
+        // Validate and add the block
+        match blockchain.receive_block(block.clone()) {
+            Ok(_) => {
+                println!("Successfully added new block {} to blockchain", block.index);
+                
+                // Remove transactions from pool that are now confirmed
+                let mut pool = self.transaction_pool.lock().unwrap();
+                pool.process_block(&block.transactions);
+                
+                Ok(())
+            }
+            Err(e) => {
+                println!("Failed to add new block: {}", e);
+                Err(e)
+            }
+        }
+    }
+
+    async fn receive_new_transaction(&self, transaction: Transaction) -> Result<(), &'static str> {
+        if !transaction.verify() {
+            return Err("Invalid transaction signature");
+        }
+
+        let mut pool = self.transaction_pool.lock().unwrap();
+        match pool.add_transaction(transaction.clone()) {
+            Ok(_) => {
+                println!("Added new transaction to pool: {}", hex::encode(&transaction.tx_hash[..8]));
+                Ok(())
+            }
+            Err(e) => {
+                println!("Failed to add transaction to pool: {}", e);
+                Err(e)
+            }
+        }
+    }
+
+    pub async fn start_mining(&self) {
+        let node = self.clone();
+        tokio::spawn(async move {
+            let mut interval = interval(BLOCK_INTERVAL);
+            loop {
+                interval.tick().await;
+
+                if !*node.is_mining.read().unwrap() {
+                    match node.mine_block().await {
+                        Ok(block) => {
+                            println!("Mined block {} with hash {}", block.index, hex::encode(&block.hash[0..8]));
+                        }
+                        Err(e) => {
+                            println!("Mining error: {}", e);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+        pub async fn start_syncing(&self) {
+        let node = self.clone();
+        tokio::spawn(async move {
+            let mut interval = interval(SYNC_INTERVAL);
+            loop {
+                interval.tick().await;
+                node.sync_blockchain().await;
+            }
+        });
+    }
+
+    // Get blockchain info
+    pub fn get_blockchain_info(&self) -> (usize, Option<String>) {
+        let blockchain = self.blockchain.read().unwrap();
+        let height = blockchain.get_block_height();
+        let last_hash = blockchain.get_last_block()
+            .map(|b| hex::encode(&b.hash));
+        (height, last_hash)
+    }
+
+
     pub fn from_sender(sender: &ProtoNode) -> Option<Self> {
         let id: [u8; ID_LENGTH] = sender.id.as_slice().try_into().ok()?;
-
+        
         Some(Self {
             public_key: sender.public_key.as_slice().try_into().ok()?,
             private_key: [0; CRYPTO_KEY_LENGTH],
@@ -88,6 +508,9 @@ impl Node {
             address: SocketAddr::new(sender.ip.parse().ok()?, sender.port as u16),
             routing_table: Arc::new(RwLock::new(RoutingTable::new(id))),
             storage: Arc::new(Default::default()),
+            blockchain: Arc::new(RwLock::new(Blockchain::new())),
+            transaction_pool: Arc::new(Mutex::new(TransactionPool::new())),
+            is_mining: Arc::new(RwLock::new(false)),
         })
     }
 
@@ -125,7 +548,10 @@ impl Node {
         }
 
         println!("BOOTSTRAP: successfully updated routing table.");
-        println!("{}", routing_table);
+        //println!("{}", routing_table);
+        drop(routing_table);
+        println!("BOOTSTRAP: syncing blockchain...");
+        self.sync_blockchain().await;
 
         Ok(())
     }
@@ -285,7 +711,7 @@ impl Node {
             });
 
         futures::future::join_all(ping_futures).await;
-
+        self.sync_blockchain().await;
         println!("JOIN: successfully joined the network.");
         Ok(())
     }
@@ -398,27 +824,6 @@ impl Node {
         Ok(())
     }
 
-    pub fn new_with_id(address: SocketAddr, id: [u8; ID_LENGTH]) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(address.to_string().as_bytes());
-        let hash = hasher.finalize();
-
-        let mut seed = [0u8; 32];
-        seed.copy_from_slice(&hash);
-
-        let mut rng = ChaCha20Rng::from_seed(seed);
-        let keypair = Keypair::generate(&mut rng);
-
-        Self {
-            public_key: keypair.public.to_bytes(),
-            private_key: keypair.secret.to_bytes(),
-            id,
-            address,
-            routing_table: Arc::new(RwLock::new(RoutingTable::new(id))),
-            storage: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
     async fn generate_pow(&self, difficulty: usize) -> ([u8; 8], [u8; 32]) {
         let mut nonce: u64 = 0;
         let target_prefix = vec![0u8; difficulty];
@@ -451,4 +856,5 @@ impl Node {
 
         computed_hash[..difficulty] == vec![0u8; difficulty][..] && computed_hash.as_slice() == pow_hash
     }
+
 }

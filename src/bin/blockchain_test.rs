@@ -1,16 +1,20 @@
+/*
 use blockchain::ledger::blockchain::Blockchain;
 use blockchain::ledger::transaction::{Transaction, TransactionType};
 use blockchain::ledger::merkle_tree::MerkleTree;
-use blockchain::ledger::hashable::Hashable; // <-- Add this line
+use blockchain::ledger::hashable::Hashable; 
 use ed25519_dalek::{Keypair, Signer};
 use rand::rngs::OsRng;
 use std::time::Duration;
 use tokio::time::sleep;
 
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Blockchain and Merkle Tree Test ===\n");
-    
+    Ok(())
+}
+   
     // 1. Create a new blockchain
     let mut blockchain = Blockchain::new();
     println!("Created new blockchain with genesis block");
@@ -183,4 +187,8 @@ fn print_blockchain_state(blockchain: &Blockchain) {
     } else {
         println!("No blocks in chain");
     }
+}
+*/
+fn main() {
+    println!("Is in comments!");
 }

@@ -1,7 +1,7 @@
 use crate::kademlia::constants::{ID_LENGTH, K, KEY_LENGTH};
 use crate::kademlia::kademlia_proto::kademlia_server::Kademlia;
 use crate::kademlia::kademlia_proto::{Node as ProtoNode, PingRequest, PingResponse, StoreRequest, StoreResponse, FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse, JoinRequest, JoinResponse};
-use crate::kademlia::node::Node;
+use crate::kademlia::node::{Node, BlockchainMessage};
 use tonic::{Request, Response, Status};
 
 static DIFFICULTY_POW: usize = 2;
@@ -74,11 +74,22 @@ impl Kademlia for KademliaService {
             Status::invalid_argument("STORE: KEY length must be 160 bits (20 bytes)")
         })?;
 
-        let storage_lock = self.node.get_storage();
-        let mut storage = storage_lock.write().map_err(|_| {
-           Status::internal("STORE: failed to acquire lock on storage")
-        })?;
-        storage.insert(key, value);
+        if let Some(response_data) = self.node.handle_blockchain_message(&value).await {
+            
+            let storage_lock = self.node.get_storage();
+            let mut storage = storage_lock.write().map_err(|_| {
+                Status::internal("STORE: failed to acquire lock on storage")
+            })?;
+            storage.insert(key, response_data);
+        } else {
+
+            let storage_lock = self.node.get_storage();
+            let mut storage = storage_lock.write().map_err(|_| {
+                Status::internal("STORE: failed to acquire lock on storage")
+            })?;
+            storage.insert(key, value);
+        }
+
 
         Ok(Response::new(StoreResponse {
             success: true,
@@ -191,6 +202,35 @@ impl Kademlia for KademliaService {
 
             nodes
         };
+
+        //After accepting the new node, send them the current blockchain state
+        tokio::spawn({
+            let node = self.node.clone();
+            let sender_node = sender.clone();
+            async move {
+                println!("Sending blockchain to new node: {}", sender_node.get_address());
+                
+                // Create blockchain response message
+                let blockchain = node.get_blockchain().read().unwrap().clone();
+                let message = BlockchainMessage::ResponseFullBlockchain { blockchain };
+                
+                if let Ok(data) = serde_json::to_vec(&message) {
+                    // Use a predictable key for the new node to find the blockchain
+                    let blockchain_key = {
+                        use sha2::{Sha256, Digest};
+                        let mut hasher = Sha256::new();
+                        hasher.update(b"initial_blockchain");
+                        hasher.update(sender_node.get_id());
+                        let hash = hasher.finalize();
+                        hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH])
+                    };
+                    
+                    // Store the blockchain for the new node
+                    let _ = node.store(blockchain_key, data).await;
+                    println!("Stored initial blockchain for new node");
+                }
+            }
+        });
 
         Ok(Response::new(JoinResponse {
             accepted: true,

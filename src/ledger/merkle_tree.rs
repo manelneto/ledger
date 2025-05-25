@@ -110,8 +110,8 @@ impl MerkleTree {
         let leaf_index = self.leaves.iter().position(|leaf| leaf == tx_hash)?;
         
         let mut proof = Vec::new();
-        let mut current_index = leaf_index;
-        let mut current_level_size = self.leaves.len();
+        let current_index = leaf_index;
+        let current_level_size = self.leaves.len();
         
         self.traverse_for_proof(
             self.root.as_ref()?,
@@ -136,9 +136,8 @@ impl MerkleTree {
             return;
         }
 
-        // Calculate sibling index
+        // Calculate if current node is right child
         let is_right = index % 2 == 1;
-        let sibling_index = if is_right { index - 1 } else { index + 1 };
 
         // Add sibling to proof
         if let (Some(left), Some(right)) = (&node.left, &node.right) {
