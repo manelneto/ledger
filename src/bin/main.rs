@@ -68,6 +68,11 @@ async fn menu(
     let bootstrap_node = Node::new(bootstrap_address);
     node.join(bootstrap_node.clone(), difficulty).await?;
 
+    println!("Starting automatic blockchain sync...");
+    node.start_syncing().await;
+
+    println!("Node joined the network and sync started.");
+
     let stdin = tokio_io::BufReader::new(tokio_io::stdin());
     let mut lines = stdin.lines();
 
@@ -104,7 +109,7 @@ async fn menu(
             "7" => handle_list_auctions(&node, &keypair, nonce.clone()).await?,
             "8" => handle_my_auctions(&node, &keypair, nonce.clone()).await?,
             "9" => handle_mine_block(&node).await?,
-            "10" => handle_blockchain_info(&node),
+            "10" => handle_blockchain_info(&node).await?,
             "99" => handle_debug_test(&node, nonce.clone()).await?,
             _ => println!("Invalid option."),
         }
@@ -303,8 +308,12 @@ async fn handle_mine_block(node: &Node) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-fn handle_blockchain_info(node: &Node) {
-    println!("\n [NODE {}] BLOCKCHAIN STATUS", node.get_address().port());
+async fn handle_blockchain_info(node: &Node) -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n[NODE {}] BLOCKCHAIN STATUS", node.get_address().port());
+    
+    // Sync before showing blockchain info
+    println!("Syncing blockchain...");
+    node.sync_blockchain().await;
     
     let (height, last_hash) = node.get_blockchain_info();
     println!("Chain Height: {} blocks", height);
@@ -339,6 +348,8 @@ fn handle_blockchain_info(node: &Node) {
                 block.transactions.len(), 
                 hex::encode(&block.hash[..8]));
     }
+    
+    Ok(())
 }
 
 async fn handle_ping(node: &Node, ip: IpAddr) -> Result<(), Box<dyn std::error::Error>> {
@@ -441,6 +452,9 @@ async fn handle_list_auctions(
     keypair: &Keypair,
     nonce: Arc<std::sync::Mutex<u64>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+
+    node.sync_blockchain().await;
+
     let blockchain = node.get_blockchain();
     let blockchain_data = {
         let guard = blockchain.read().unwrap();
@@ -581,6 +595,8 @@ async fn handle_my_auctions(
     nonce: Arc<std::sync::Mutex<u64>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!(" Finding your auctions...");
+
+    node.sync_blockchain().await;
     
     let blockchain = node.get_blockchain();
     let blockchain_data = {

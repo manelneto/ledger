@@ -179,20 +179,8 @@ impl Node {
             pool.add_transaction(tx.clone())?;
         }
 
-        self.broadcast_transaction(tx).await;
+
         Ok(())
-    }
-
-    async fn broadcast_transaction(&self, tx: Transaction) {
-        let message = BlockchainMessage::NewTransaction {
-            transaction: tx.clone(),
-        };
-        let data = serde_json::to_vec(&message).unwrap_or_default();
-
-        let key = tx.tx_hash[..KEY_LENGTH]
-            .try_into()
-            .unwrap_or([0; KEY_LENGTH]);
-        self.store(key, data).await.unwrap_or(());
     }
 
     pub async fn mine_block(&self) -> Result<Block, &'static str> {
