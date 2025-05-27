@@ -478,11 +478,12 @@ async fn handle_list_auctions(
         println!();
     }
 
-    auction_submenu(&auctions, keypair, nonce).await?;
+    auction_submenu(&node, &auctions, keypair, nonce).await?;
     Ok(())
 }
 
 async fn auction_submenu(
+    node: &Node,
     auctions: &HashMap<String, Auction>,
     keypair: &Keypair,
     nonce: Arc<std::sync::Mutex<u64>>,
@@ -504,7 +505,7 @@ async fn auction_submenu(
 
         match input.as_str() {
             "0" => break,
-            "B" => handle_bid(auctions, keypair, nonce.clone()).await?,
+            "B" => handle_bid(&node, auctions, keypair, nonce.clone()).await?,
             _ => println!("Invalid option."),
         }
     }
@@ -512,6 +513,7 @@ async fn auction_submenu(
 }
 
 async fn handle_bid(
+    node: &Node,
     auctions: &HashMap<String, Auction>,
     keypair: &Keypair,
     nonce: Arc<std::sync::Mutex<u64>>,
@@ -562,13 +564,22 @@ async fn handle_bid(
             }
 
             let mut nonce_lock = nonce.lock().unwrap();
-            if let Err(e) = tx_bid(keypair, auction_id, bid_amount, *nonce_lock){
-                eprintln!("Failed to bid on auction: {:?}", e);
-            }
-            else{
-                *nonce_lock += 1;
-                println!("Bid placed successfully!");
-            }
+            match tx_bid(keypair, auction_id.clone(), bid_amount, *nonce_lock){
+                Ok(transaction) => {
+                    let tx_pool = node.get_transaction_pool();
+                    let mut tx_pool_guard = tx_pool.lock().unwrap();
+                    match tx_pool_guard.add_transaction(transaction) {
+                        Ok(_) => {
+                            println!("Bid placed successfully!");
+                            println!("Auction ID: {}", auction_id);
+                            println!("Amount: {}", bid_amount);
+                            *nonce_lock += 1;
+                        }
+                        Err(e) => println!("Failed to add auction to transaction pool: {}", e),
+                    }
+                }
+                Err(e) => println!("Failed to create auction transaction: {}", e),
+            }            
         }
         None => println!("Invalid auction ID"),
     }
@@ -624,11 +635,12 @@ async fn handle_my_auctions(
         println!();
     }
 
-    my_auctions_submenu(&my_auctions, keypair, nonce).await?;
+    my_auctions_submenu(&node,&my_auctions, keypair, nonce).await?;
     Ok(())
 }
 
 async fn my_auctions_submenu(
+    node: &Node,
     my_auctions: &HashMap<String, Auction>,
     keypair: &Keypair,
     nonce: Arc<std::sync::Mutex<u64>>,
@@ -651,8 +663,8 @@ async fn my_auctions_submenu(
 
         match input.as_str() {
             "0" => break,
-            "S" => handle_start_auction(my_auctions, keypair, nonce.clone()).await?,
-            "E" => handle_end_auction(my_auctions, keypair, nonce.clone()).await?,
+            "S" => handle_start_auction(&node, my_auctions, keypair, nonce.clone()).await?,
+            "E" => handle_end_auction(&node,my_auctions, keypair, nonce.clone()).await?,
             _ => println!("Invalid option."),
         }
     }
@@ -660,6 +672,7 @@ async fn my_auctions_submenu(
 }
 
 async fn handle_start_auction(
+    node: &Node,
     my_auctions: &HashMap<String, Auction>,
     keypair: &Keypair,
     nonce: Arc<std::sync::Mutex<u64>>,
@@ -689,12 +702,20 @@ async fn handle_start_auction(
             println!("Auction ID: {}", auction_id);
 
             let mut nonce_lock = nonce.lock().unwrap();
-            if let Err(e) = tx_start_auction(keypair, auction_id, *nonce_lock){
-                eprintln!("Failed to start auction: {:?}", e);
-            }
-            else{
-                *nonce_lock += 1;
-                println!("Auction started successfully!");
+            match tx_start_auction(keypair, auction_id.clone(), *nonce_lock){
+                Ok(transaction) => {
+                    let tx_pool = node.get_transaction_pool();
+                    let mut tx_pool_guard = tx_pool.lock().unwrap();
+                    match tx_pool_guard.add_transaction(transaction) {
+                        Ok(_) => {
+                            println!("Auction started successfully!");
+                            println!("Auction ID: {}", auction_id);
+                            *nonce_lock += 1;
+                        }
+                        Err(e) => println!("Failed to add auction to transaction pool: {}", e),
+                    }
+                }
+                Err(e) => println!("Failed to create auction transaction: {}", e),
             }
         }
         None => {
@@ -705,6 +726,7 @@ async fn handle_start_auction(
 }
 
 async fn handle_end_auction(
+    node: &Node,
     my_auctions: &HashMap<String, Auction>,
     keypair: &Keypair,
     nonce: Arc<std::sync::Mutex<u64>>,
@@ -748,13 +770,21 @@ async fn handle_end_auction(
             let confirm = prompt("Are you sure you want to end this auction? (y/N): ").await;
             if confirm.to_lowercase() == "y" || confirm.to_lowercase() == "yes" {
                 let mut nonce_lock = nonce.lock().unwrap();
-            if let Err(e) =  tx_end_auction(keypair, auction_id, *nonce_lock){
-                eprintln!("Failed to end auction: {:?}", e);
-            }
-            else{
-                *nonce_lock += 1;
-                println!("Auction ended successfully!");
-            }
+                match tx_end_auction(keypair, auction_id.clone(), *nonce_lock){
+                    Ok(transaction) => {
+                        let tx_pool = node.get_transaction_pool();
+                        let mut tx_pool_guard = tx_pool.lock().unwrap();
+                        match tx_pool_guard.add_transaction(transaction) {
+                            Ok(_) => {
+                                println!("Auction started successfully!");
+                                println!("Auction ID: {}", auction_id);
+                                *nonce_lock += 1;
+                            }
+                            Err(e) => println!("Failed to add auction to transaction pool: {}", e),
+                        }
+                    }
+                    Err(e) => println!("Failed to create auction transaction: {}", e),
+                }
             }
         }
         None => {
