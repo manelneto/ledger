@@ -82,6 +82,9 @@ async fn menu(
         println!("6. CREATE AUCTION");
         println!("7. LIST AUCTIONS");
         println!("8. LIST MY AUCTIONS");
+        println!("9. Mine Block");
+        println!("10. Show BLOCKCHAIN INFO");
+        println!("99. DEBUG TEST");
         print!("\nOption: ");
         io::stdout().flush().unwrap();
 
@@ -100,8 +103,241 @@ async fn menu(
             "6" => handle_create_auction(&node, &keypair, nonce.clone()).await?,
             "7" => handle_list_auctions(&node, &keypair, nonce.clone()).await?,
             "8" => handle_my_auctions(&node, &keypair, nonce.clone()).await?,
+            "9" => handle_mine_block(&node).await?,
+            "10" => handle_blockchain_info(&node),
+            "99" => handle_debug_test(&node, nonce.clone()).await?,
             _ => println!("Invalid option."),
         }
+    }
+}
+
+async fn handle_debug_test(
+    node: &Node,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n🔍 === DEBUG TEST START ===");
+    
+    // Test 1: Check transaction pool before anything
+    println!("\n🔍 TEST 1: Initial pool state");
+    let pool = node.get_transaction_pool();
+    let pool_guard = pool.lock().unwrap();
+    println!("📊 Pool size: {}", pool_guard.size());
+    drop(pool_guard);
+    
+    // Test 2: Create a simple transaction
+    println!("\n🔍 TEST 2: Creating test transaction");
+    let mut nonce_lock = nonce.lock().unwrap();
+    let current_nonce = *nonce_lock;
+    
+    let test_data = format!("DEBUG_TEST_{}", current_nonce);
+    println!("📝 Creating transaction with data: {}", test_data);
+    
+    match node.create_transaction(
+        None,
+        blockchain::ledger::transaction::TransactionType::Data,
+        None,
+        Some(test_data.clone()),
+    ).await {
+        Ok(tx) => {
+            println!("✅ Transaction created:");
+            println!("   Hash: {}", hex::encode(&tx.tx_hash[..8]));
+            println!("   Valid: {}", tx.verify());
+            println!("   Sender: {:02x?}", &tx.data.sender[..4]);
+            println!("   Data: {:?}", tx.data.data);
+            println!("   Fee: {}", tx.data.fee);
+            println!("   Nonce: {}", tx.data.nonce);
+            
+            // Test 3: Submit transaction
+            println!("\n🔍 TEST 3: Submitting transaction");
+            match node.submit_transaction(tx).await {
+                Ok(_) => {
+                    println!("✅ Transaction submitted successfully");
+                    *nonce_lock += 1;
+                }
+                Err(e) => {
+                    println!("❌ Failed to submit transaction: {}", e);
+                    return Ok(());
+                }
+            }
+        }
+        Err(e) => {
+            println!("❌ Failed to create transaction: {}", e);
+            return Ok(());
+        }
+    }
+    drop(nonce_lock);
+    
+    // Test 4: Check pool after submission
+    println!("\n🔍 TEST 4: Pool state after submission");
+    let pool = node.get_transaction_pool();
+    let pool_guard = pool.lock().unwrap();
+    let pool_size = pool_guard.size();
+    println!("📊 Pool size: {}", pool_size);
+    
+    if pool_size > 0 {
+        println!("📦 Transactions in pool:");
+        let all_txs = pool_guard.get_all_transactions();
+        for (i, tx) in all_txs.iter().enumerate() {
+            println!("   {}. Hash: {}, Valid: {}", 
+                     i+1, 
+                     hex::encode(&tx.tx_hash[..8]), 
+                     tx.verify());
+            if let Some(data) = &tx.data.data {
+                println!("      Data: {}", data);
+            }
+            println!("      Fee: {}, Nonce: {}", tx.data.fee, tx.data.nonce);
+        }
+    } else {
+        println!("❌ No transactions in pool!");
+    }
+    drop(pool_guard);
+    
+    // Test 5: Try to mine
+    println!("\n🔍 TEST 5: Attempting to mine block");
+    match node.mine_block().await {
+        Ok(block) => {
+            println!("✅ Block mined successfully!");
+            println!("   Index: {}", block.index);
+            println!("   Hash: {}", hex::encode(&block.hash[..8]));
+            println!("   Transactions: {}", block.transactions.len());
+            
+            if block.transactions.len() > 0 {
+                println!("   🎉 SUCCESS: Transaction was mined into block!");
+                for (i, tx) in block.transactions.iter().enumerate() {
+                    println!("      {}. TX: {}", i+1, hex::encode(&tx.tx_hash[..8]));
+                    if let Some(data) = &tx.data.data {
+                        println!("         Data: {}", data);
+                    }
+                }
+            } else {
+                println!("   ❌ PROBLEM: Block is empty even though we had transactions!");
+            }
+        }
+        Err(e) => {
+            println!("❌ Mining failed: {}", e);
+        }
+    }
+    
+    // Test 6: Final pool check
+    println!("\n🔍 TEST 6: Final pool state");
+    let pool = node.get_transaction_pool();
+    let pool_guard = pool.lock().unwrap();
+    println!("📊 Final pool size: {}", pool_guard.size());
+    
+    println!("\n🔍 === DEBUG TEST COMPLETE ===");
+    Ok(())
+}
+
+
+async fn handle_mine_block(node: &Node) -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n [NODE {}] STARTING MANUAL MINING...", node.get_address().port());
+    
+    // Check transaction pool first
+    let pool_size = {
+        let pool = node.get_transaction_pool();
+        let pool_guard = pool.lock().unwrap();
+        pool_guard.size()
+    };
+    
+    if pool_size == 0 {
+        println!("[NODE {}] No transactions in pool - mining empty block", node.get_address().port());
+    } else {
+        println!("[NODE {}] Mining block with {} pending transactions", node.get_address().port(), pool_size);
+        
+        // Show what transactions we're about to mine
+        let pool = node.get_transaction_pool();
+        let pool_guard = pool.lock().unwrap();
+        let transactions = pool_guard.get_all_transactions();
+        
+        for (i, tx) in transactions.iter().enumerate() {
+            if let Some(data) = &tx.data.data {
+                if data.starts_with("AUCTION_") {
+                    let cmd_part = &data[8..std::cmp::min(data.len(), 50)];
+                    println!("   {}. Auction: {}", i+1, cmd_part);
+                }
+            } else if tx.data.amount.is_some() {
+                println!("   {}. Transfer: {} tokens", i+1, tx.data.amount.unwrap());
+            }
+        }
+    }
+    
+    let start_time = std::time::Instant::now();
+    
+    match node.mine_block().await {
+        Ok(block) => {
+            let mining_time = start_time.elapsed();
+            
+            println!("[NODE {}] BLOCK MINED SUCCESSFULLY!", node.get_address().port());
+            println!("Block Index: {}", block.index);
+            println!("Block Hash: {}", hex::encode(&block.hash[..8]));
+            println!("Nonce: {}", block.nonce);
+            println!("Mining Time: {:.2}s", mining_time.as_secs_f64());
+            println!("Transactions Mined: {}", block.transactions.len());
+            
+            // Show which auction operations were mined
+            if block.transactions.len() > 0 {
+                println!("Auction operations in this block:");
+                for (i, tx) in block.transactions.iter().enumerate() {
+                    if let Some(data) = &tx.data.data {
+                        if data.starts_with("AUCTION_") {
+                            if data.contains("CreateAuction") {
+                                println!("      {}. Auction Created", i+1);
+                            } else if data.contains("StartAuction") {
+                                println!("      {}. Auction Started", i+1);
+                            } else if data.contains("Bid") {
+                                println!("      {}. Bid Placed", i+1);
+                            } else if data.contains("EndAuction") {
+                                println!("      {}. Auction Ended", i+1);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            println!("[NODE {}] Block successfully added to blockchain!", node.get_address().port());
+        }
+        Err(e) => {
+            println!("[NODE {}] Mining failed: {}", node.get_address().port(), e);
+        }
+    }
+    Ok(())
+}
+
+fn handle_blockchain_info(node: &Node) {
+    println!("\n [NODE {}] BLOCKCHAIN STATUS", node.get_address().port());
+    
+    let (height, last_hash) = node.get_blockchain_info();
+    println!("Chain Height: {} blocks", height);
+    
+    if let Some(hash) = last_hash {
+        println!("Last Block Hash: {}", &hash[..16]);
+    }
+    
+    // Show transaction pool status
+    let pool = node.get_transaction_pool();
+    let pool_guard = pool.lock().unwrap();
+    let pool_size = pool_guard.size();
+    println!("Transaction Pool: {} pending transactions", pool_size);
+    
+    if pool_size > 0 {
+        println!("Tip: Use option 9 to mine these transactions into a block!");
+    }
+    
+    // Show recent blocks
+    let blockchain = node.get_blockchain();
+    let blockchain_guard = blockchain.read().unwrap();
+    let recent_blocks = if blockchain_guard.blocks.len() >= 3 {
+        &blockchain_guard.blocks[blockchain_guard.blocks.len()-3..]
+    } else {
+        &blockchain_guard.blocks[..]
+    };
+    
+    println!("Recent Blocks:");
+    for block in recent_blocks {
+        println!("Block {}: {} transactions, hash: {}", 
+                block.index, 
+                block.transactions.len(), 
+                hex::encode(&block.hash[..8]));
     }
 }
 
