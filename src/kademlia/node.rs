@@ -1,27 +1,30 @@
-use crate::kademlia::constants::{ALPHA, CRYPTO_KEY_LENGTH, ID_LENGTH, KEY_LENGTH, K, TIMEOUT, TRIES};
-use crate::kademlia::kademlia_proto::{FindNodeRequest, FindValueRequest, Node as ProtoNode, PingRequest, StoreRequest, JoinRequest};
+use crate::kademlia::constants::{
+    ALPHA, CRYPTO_KEY_LENGTH, ID_LENGTH, K, KEY_LENGTH, TIMEOUT, TRIES,
+};
+use crate::kademlia::kademlia_proto::kademlia_client::KademliaClient;
+use crate::kademlia::kademlia_proto::kademlia_server::KademliaServer;
+use crate::kademlia::kademlia_proto::{
+    FindNodeRequest, FindValueRequest, JoinRequest, Node as ProtoNode, PingRequest, StoreRequest,
+};
 use crate::kademlia::routing_table::RoutingTable;
-use crate::ledger::blockchain::Blockchain;
+use crate::kademlia::service::KademliaService;
 use crate::ledger::block::Block;
+use crate::ledger::blockchain::Blockchain;
 use crate::ledger::transaction::{Transaction, TransactionType};
 use crate::ledger::transaction_pool::TransactionPool;
 use ed25519_dalek::{Keypair, PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use futures::stream::{FuturesUnordered, StreamExt};
 use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::net::SocketAddr;
-use std::sync::{Arc, RwLock, Mutex};
-use std::time::Duration;
-use tokio::time::{timeout, interval};
-use tonic::{Request, Status};
-use tonic::transport::Server;
-use crate::kademlia::kademlia_proto::kademlia_client::KademliaClient;
-use crate::kademlia::kademlia_proto::kademlia_server::KademliaServer;
-use crate::kademlia::service::KademliaService;
-use serde::{Serialize, Deserialize};
 use std::fmt;
-
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
+use tokio::time::{interval, timeout};
+use tonic::transport::Server;
+use tonic::{Request, Status};
 
 // Constants for blockchain operations
 const BLOCK_INTERVAL: Duration = Duration::from_secs(30);
@@ -64,7 +67,9 @@ impl Node {
     pub fn new(address: SocketAddr) -> Self {
         let keypair = Keypair::generate(&mut OsRng);
         let hash = Sha256::digest(keypair.public.to_bytes());
-        let id = hash[..ID_LENGTH].try_into().expect("SHA-256 hash length must be 160 bits (20 bytes)");
+        let id = hash[..ID_LENGTH]
+            .try_into()
+            .expect("SHA-256 hash length must be 160 bits (20 bytes)");
 
         Self {
             public_key: keypair.public.to_bytes(),
@@ -96,10 +101,10 @@ impl Node {
     }
 
     fn get_keypair(&self) -> Result<Keypair, &'static str> {
-        let secret = DalekSecretKey::from_bytes(&self.private_key)
-            .map_err(|_| "Invalid private key")?;
-        let public = DalekPublicKey::from_bytes(&self.public_key)
-            .map_err(|_| "Invalid public key")?;
+        let secret =
+            DalekSecretKey::from_bytes(&self.private_key).map_err(|_| "Invalid private key")?;
+        let public =
+            DalekPublicKey::from_bytes(&self.public_key).map_err(|_| "Invalid public key")?;
         Ok(Keypair { secret, public })
     }
 
@@ -137,7 +142,7 @@ impl Node {
         tx_type: TransactionType,
         amount: Option<u64>,
         data: Option<String>,
-    ) -> Result<Transaction, &'static str>{
+    ) -> Result<Transaction, &'static str> {
         let blockchain = self.blockchain.read().unwrap();
         let sender = self.public_key.to_vec();
         let nonce = blockchain.get_next_nonce(&sender);
@@ -147,7 +152,7 @@ impl Node {
             TransactionType::Data => 500,
         };
 
-        let tx_data = crate::ledger::transaction::TransactionData{
+        let tx_data = crate::ledger::transaction::TransactionData {
             sender: sender.clone(),
             receiver,
             timestamp: crate::ledger::lib::now(),
@@ -164,8 +169,8 @@ impl Node {
         Ok(tx)
     }
 
-    pub async fn submit_transaction(&self, tx: Transaction) -> Result<(), &'static str>{
-        if !tx.verify(){
+    pub async fn submit_transaction(&self, tx: Transaction) -> Result<(), &'static str> {
+        if !tx.verify() {
             return Err("Invalid transaction signature");
         }
 
@@ -178,18 +183,22 @@ impl Node {
         Ok(())
     }
 
-    async fn broadcast_transaction(&self, tx: Transaction){
-        let message = BlockchainMessage::NewTransaction { transaction: tx.clone() };
+    async fn broadcast_transaction(&self, tx: Transaction) {
+        let message = BlockchainMessage::NewTransaction {
+            transaction: tx.clone(),
+        };
         let data = serde_json::to_vec(&message).unwrap_or_default();
 
-        let key = tx.tx_hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH]);
+        let key = tx.tx_hash[..KEY_LENGTH]
+            .try_into()
+            .unwrap_or([0; KEY_LENGTH]);
         self.store(key, data).await.unwrap_or(());
     }
 
-    pub async fn mine_block(&self) -> Result<Block, &'static str>{
+    pub async fn mine_block(&self) -> Result<Block, &'static str> {
         {
             let mut mining = self.is_mining.write().unwrap();
-            if *mining{
+            if *mining {
                 return Err("Already Mining");
             }
             *mining = true;
@@ -205,10 +214,10 @@ impl Node {
         result
     }
 
-    async fn mine_pow_block(&self) -> Result<Block, &'static str>{
+    async fn mine_pow_block(&self) -> Result<Block, &'static str> {
         let transactions = {
             let pool = self.transaction_pool.lock().unwrap();
-            pool.get_transactions_for_block(MAX_TRANSACTIONS_PER_BLOCK, 1_000_000)
+            pool.get_transactions_4_block(MAX_TRANSACTIONS_PER_BLOCK)
         };
 
         let mut block = {
@@ -216,7 +225,6 @@ impl Node {
             blockchain.create_block(transactions)?
         };
 
-        // Mine Block (Proof of Work)
         {
             let blockchain = self.blockchain.read().unwrap();
             blockchain.mine_block(&mut block)?;
@@ -237,9 +245,11 @@ impl Node {
         Ok(block)
     }
 
-    async fn broadcast_block(&self, block: Block){
+    async fn broadcast_block(&self, block: Block) {
         println!("Broadcasting new block {} to network", block.index);
-        let message = BlockchainMessage::NewBlock { block: block.clone() };
+        let message = BlockchainMessage::NewBlock {
+            block: block.clone(),
+        };
         let data = serde_json::to_vec(&message).unwrap_or_default();
 
         let nodes = {
@@ -249,15 +259,26 @@ impl Node {
 
         let mut broadcast_futures = FuturesUnordered::new();
 
-         for node in nodes {
+        for node in nodes {
             if node.get_id() != self.get_id() {
                 let data_clone = data.clone();
-                let key = block.hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH]);
-                
+                let key = block.hash[..KEY_LENGTH]
+                    .try_into()
+                    .unwrap_or([0; KEY_LENGTH]);
+
                 broadcast_futures.push(async move {
-                    match timeout(Duration::from_secs(5), self.store_at(&node, key, data_clone)).await {
-                        Ok(Ok(_)) => println!("Successfully broadcast block to {}", node.get_address()),
-                        Ok(Err(e)) => println!("Failed to broadcast block to {}: {}", node.get_address(), e),
+                    match timeout(
+                        Duration::from_secs(5),
+                        self.store_at(&node, key, data_clone),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => {
+                            println!("Successfully broadcast block to {}", node.get_address())
+                        }
+                        Ok(Err(e)) => {
+                            println!("Failed to broadcast block to {}: {}", node.get_address(), e)
+                        }
                         Err(_) => println!("Timeout broadcasting block to {}", node.get_address()),
                     }
                 });
@@ -307,9 +328,11 @@ impl Node {
                 Ok(blockchain) => {
                     let height = blockchain.get_block_height();
                     println!("Received blockchain with height: {}", height);
-                
+
                     // Accept ANY blockchain that's valid, even if same height (to sync genesis)
-                    if blockchain.is_chain_valid(None) && (height > best_height || best_blockchain.is_none()) {
+                    if blockchain.is_chain_valid(None)
+                        && (height > best_height || best_blockchain.is_none())
+                    {
                         best_height = height;
                         best_blockchain = Some(blockchain);
                         println!("Found blockchain with height {}", height);
@@ -333,12 +356,15 @@ impl Node {
         }
     }
 
-    async fn request_full_blockchain(&self, node: Node) -> Result<Blockchain, Box<dyn std::error::Error>> {
+    async fn request_full_blockchain(
+        &self,
+        node: Node,
+    ) -> Result<Blockchain, Box<dyn std::error::Error>> {
         println!("Requesting full blockchain from {}", node.get_address());
-        
+
         let message = BlockchainMessage::RequestFullBlockchain;
         let request_data = serde_json::to_vec(&message)?;
-        
+
         // Use a unique key for blockchain requests
         let request_key = {
             let mut hasher = Sha256::new();
@@ -351,24 +377,27 @@ impl Node {
 
         // Store the request
         self.store_at(&node, request_key, request_data).await?;
-        
+
         // Wait a bit and then try to retrieve the response
         tokio::time::sleep(Duration::from_millis(1000)).await;
-        
+
         let (response_data, _) = self.find_value(node, request_key).await?;
-        
+
         if let Some(data) = response_data {
             if let Ok(message) = serde_json::from_slice::<BlockchainMessage>(&data) {
                 match message {
                     BlockchainMessage::ResponseFullBlockchain { blockchain } => {
-                        println!("Received full blockchain with {} blocks", blockchain.get_block_height());
+                        println!(
+                            "Received full blockchain with {} blocks",
+                            blockchain.get_block_height()
+                        );
                         return Ok(blockchain);
                     }
                     _ => return Err("Unexpected message type".into()),
                 }
             }
         }
-        
+
         Err("Failed to receive blockchain response".into())
     }
 
@@ -381,36 +410,47 @@ impl Node {
                     let response = BlockchainMessage::ResponseFullBlockchain { blockchain };
                     return serde_json::to_vec(&response).ok();
                 }
-            
+
                 BlockchainMessage::NewBlock { block } => {
                     println!("Received new block: {}", block.index);
                     if let Err(e) = self.receive_new_block(block).await {
                         println!("Failed to process new block: {}", e);
                     }
                 }
-            
+
                 BlockchainMessage::NewTransaction { transaction } => {
-                    println!("Received new transaction: {}", hex::encode(&transaction.tx_hash[..8]));
+                    println!(
+                        "Received new transaction: {}",
+                        hex::encode(&transaction.tx_hash[..8])
+                    );
                     if let Err(e) = self.receive_new_transaction(transaction).await {
                         println!("Failed to process new transaction: {}", e);
                     }
                 }
-            
+
                 BlockchainMessage::ResponseFullBlockchain { blockchain } => {
                     // NEW: Handle blockchain response by replacing current blockchain
-                    println!("Received blockchain response with {} blocks", blockchain.get_block_height());
+                    println!(
+                        "Received blockchain response with {} blocks",
+                        blockchain.get_block_height()
+                    );
                     let current_height = {
                         let current_blockchain = self.blockchain.read().unwrap();
                         current_blockchain.get_block_height()
                     };
-                
-                    if blockchain.get_block_height() > current_height && blockchain.is_chain_valid(None) {
+
+                    if blockchain.get_block_height() > current_height
+                        && blockchain.is_chain_valid(None)
+                    {
                         let mut our_blockchain = self.blockchain.write().unwrap();
                         *our_blockchain = blockchain;
-                        println!("Replaced blockchain with {} blocks", our_blockchain.get_block_height());
+                        println!(
+                            "Replaced blockchain with {} blocks",
+                            our_blockchain.get_block_height()
+                        );
                     }
-                }   
-            
+                }
+
                 _ => {}
             }
         }
@@ -419,16 +459,16 @@ impl Node {
 
     async fn receive_new_block(&self, block: Block) -> Result<(), &'static str> {
         let mut blockchain = self.blockchain.write().unwrap();
-        
+
         // Validate and add the block
         match blockchain.receive_block(block.clone()) {
             Ok(_) => {
                 println!("Successfully added new block {} to blockchain", block.index);
-                
+
                 // Remove transactions from pool that are now confirmed
                 let mut pool = self.transaction_pool.lock().unwrap();
                 pool.process_block(&block.transactions);
-                
+
                 Ok(())
             }
             Err(e) => {
@@ -446,7 +486,10 @@ impl Node {
         let mut pool = self.transaction_pool.lock().unwrap();
         match pool.add_transaction(transaction.clone()) {
             Ok(_) => {
-                println!("Added new transaction to pool: {}", hex::encode(&transaction.tx_hash[..8]));
+                println!(
+                    "Added new transaction to pool: {}",
+                    hex::encode(&transaction.tx_hash[..8])
+                );
                 Ok(())
             }
             Err(e) => {
@@ -466,7 +509,11 @@ impl Node {
                 if !*node.is_mining.read().unwrap() {
                     match node.mine_block().await {
                         Ok(block) => {
-                            println!("Mined block {} with hash {}", block.index, hex::encode(&block.hash[0..8]));
+                            println!(
+                                "Mined block {} with hash {}",
+                                block.index,
+                                hex::encode(&block.hash[0..8])
+                            );
                         }
                         Err(e) => {
                             println!("Mining error: {}", e);
@@ -477,7 +524,7 @@ impl Node {
         });
     }
 
-        pub async fn start_syncing(&self) {
+    pub async fn start_syncing(&self) {
         let node = self.clone();
         tokio::spawn(async move {
             let mut interval = interval(SYNC_INTERVAL);
@@ -492,15 +539,13 @@ impl Node {
     pub fn get_blockchain_info(&self) -> (usize, Option<String>) {
         let blockchain = self.blockchain.read().unwrap();
         let height = blockchain.get_block_height();
-        let last_hash = blockchain.get_last_block()
-            .map(|b| hex::encode(&b.hash));
+        let last_hash = blockchain.get_last_block().map(|b| hex::encode(&b.hash));
         (height, last_hash)
     }
 
-
     pub fn from_sender(sender: &ProtoNode) -> Option<Self> {
         let id: [u8; ID_LENGTH] = sender.id.as_slice().try_into().ok()?;
-        
+
         Some(Self {
             public_key: sender.public_key.as_slice().try_into().ok()?,
             private_key: [0; CRYPTO_KEY_LENGTH],
@@ -524,9 +569,13 @@ impl Node {
     }
 
     pub async fn bootstrap(&self, bootstrap_node: Node) -> Result<(), Box<dyn std::error::Error>> {
-        let mut client = KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
+        let mut client =
+            KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
 
-        println!("BOOTSTRAP: sending FIND_NODE request to boostrap node ({})...", bootstrap_node);
+        println!(
+            "BOOTSTRAP: sending FIND_NODE request to boostrap node ({})...",
+            bootstrap_node
+        );
 
         let request = Request::new(FindNodeRequest {
             sender: Some(self.to_send()),
@@ -535,11 +584,15 @@ impl Node {
 
         let response = client.find_node(request).await?.into_inner();
 
-        println!("BOOTSTRAP: received FIND_NODE response from boostrap node ({})!", bootstrap_node);
+        println!(
+            "BOOTSTRAP: received FIND_NODE response from boostrap node ({})!",
+            bootstrap_node
+        );
 
-        let mut routing_table = self.routing_table.write().map_err(|_| {
-            Status::internal("BOOTSTRAP: failed to acquire lock on routing table")
-        })?;
+        let mut routing_table = self
+            .routing_table
+            .write()
+            .map_err(|_| Status::internal("BOOTSTRAP: failed to acquire lock on routing table"))?;
 
         for proto in response.nodes {
             if let Some(node) = Node::from_sender(&proto) {
@@ -556,8 +609,9 @@ impl Node {
         Ok(())
     }
 
-    pub async fn ping(&self, target: &Node) -> Result<bool , Box<dyn std::error::Error>> {
-        let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
+    pub async fn ping(&self, target: &Node) -> Result<bool, Box<dyn std::error::Error>> {
+        let mut client =
+            KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
         for _ in 0..TRIES {
             println!("PING: sending PING request to {}...", target);
@@ -578,7 +632,11 @@ impl Node {
         Ok(false)
     }
 
-    pub async fn store(&self, key: [u8; KEY_LENGTH], value: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn store(
+        &self,
+        key: [u8; KEY_LENGTH],
+        value: Vec<u8>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         {
             let storage_lock = self.get_storage();
             let mut storage = storage_lock.write().unwrap();
@@ -594,8 +652,14 @@ impl Node {
         Ok(())
     }
 
-    pub async fn store_at(&self, target: &Node, key: [u8; KEY_LENGTH], value: Vec<u8>) -> Result<bool, Box<dyn std::error::Error>> {
-        let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
+    pub async fn store_at(
+        &self,
+        target: &Node,
+        key: [u8; KEY_LENGTH],
+        value: Vec<u8>,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let mut client =
+            KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
         println!("STORE: sending STORE request to {}...", target);
 
@@ -612,9 +676,13 @@ impl Node {
         Ok(response.success)
     }
 
-
-    pub async fn find_node(&self, target: Node, id: [u8; ID_LENGTH]) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
-        let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
+    pub async fn find_node(
+        &self,
+        target: Node,
+        id: [u8; ID_LENGTH],
+    ) -> Result<Vec<Node>, Box<dyn std::error::Error>> {
+        let mut client =
+            KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
         println!("FIND_NODE: sending FIND_NODE request to {}...", target);
 
@@ -627,7 +695,8 @@ impl Node {
 
         println!("FIND_NODE: received FIND_NODE response from {}!", target);
 
-        let nodes = response.nodes
+        let nodes = response
+            .nodes
             .into_iter()
             .filter_map(|proto| Node::from_sender(&proto))
             .collect();
@@ -635,8 +704,13 @@ impl Node {
         Ok(nodes)
     }
 
-    pub async fn find_value(&self, target: Node, key: [u8; KEY_LENGTH]) -> Result<(Option<Vec<u8>>, Vec<Node>), Box<dyn std::error::Error>> {
-        let mut client = KademliaClient::connect(format!("http://{}", target.get_address())).await?;
+    pub async fn find_value(
+        &self,
+        target: Node,
+        key: [u8; KEY_LENGTH],
+    ) -> Result<(Option<Vec<u8>>, Vec<Node>), Box<dyn std::error::Error>> {
+        let mut client =
+            KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
         println!("FIND_VALUE: sending FIND_VALUE request to {}...", target);
 
@@ -648,7 +722,8 @@ impl Node {
         let response = client.find_value(request).await?.into_inner();
 
         let value = response.value;
-        let nodes = response.nodes
+        let nodes = response
+            .nodes
             .into_iter()
             .filter_map(|proto| Node::from_sender(&proto))
             .collect();
@@ -658,16 +733,24 @@ impl Node {
         Ok((value, nodes))
     }
 
-    pub async fn join(&self, bootstrap_node: Node, difficulty: usize) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn join(
+        &self,
+        bootstrap_node: Node,
+        difficulty: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         if !self.ping(&bootstrap_node).await? {
             return Err("JOIN: error pinging boostrap node!".into());
         }
 
         let (nonce, pow_hash) = self.generate_pow(difficulty).await;
 
-        println!("JOIN: sending JOIN request to bootstrap node ({})...", bootstrap_node);
+        println!(
+            "JOIN: sending JOIN request to bootstrap node ({})...",
+            bootstrap_node
+        );
 
-        let mut client = KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
+        let mut client =
+            KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
 
         let request = Request::new(JoinRequest {
             sender: Some(self.to_send()),
@@ -677,14 +760,18 @@ impl Node {
 
         let response = client.join(request).await?.into_inner();
 
-        println!("JOIN: received JOIN response from bootstrap node ({})!", bootstrap_node);
+        println!(
+            "JOIN: received JOIN response from bootstrap node ({})!",
+            bootstrap_node
+        );
 
         if !response.accepted {
             return Err("JOIN: request rejected by bootstrap node!".into());
         }
 
         let routing_table_lock = self.routing_table.clone();
-        let ping_futures = response.closest_nodes
+        let ping_futures = response
+            .closest_nodes
             .into_iter()
             .filter_map(|proto| {
                 let node = Node::from_sender(&proto)?;
@@ -694,18 +781,22 @@ impl Node {
                 let routing_table_lock = routing_table_lock.clone();
                 async move {
                     match tokio::time::timeout(Duration::from_secs(5), self.ping(&node)).await {
-                        Ok(Ok(true)) => {
-                            match routing_table_lock.write() {
-                                Ok(mut routing_table) => {
-                                    routing_table.update(node.clone());
-                                    println!("JOIN: successfully pinged {}, so updated routing table.", node);
-                                }
-                                Err(_) => {
-                                    println!("JOIN: failed to acquire lock on routing table.");
-                                }
+                        Ok(Ok(true)) => match routing_table_lock.write() {
+                            Ok(mut routing_table) => {
+                                routing_table.update(node.clone());
+                                println!(
+                                    "JOIN: successfully pinged {}, so updated routing table.",
+                                    node
+                                );
                             }
-                        }
-                        _ => println!("JOIN: failed to ping {}, so did not update routing table.", node),
+                            Err(_) => {
+                                println!("JOIN: failed to acquire lock on routing table.");
+                            }
+                        },
+                        _ => println!(
+                            "JOIN: failed to ping {}, so did not update routing table.",
+                            node
+                        ),
                     }
                 }
             });
@@ -719,7 +810,9 @@ impl Node {
     pub async fn iterative_find_node(&self, target: [u8; ID_LENGTH]) -> Vec<Node> {
         let mut closest: Vec<Node> = {
             let routing_table_lock = self.get_routing_table();
-            let routing_table = routing_table_lock.read().expect("ITERATIVE_FIND_NODE: failed to read routing table");
+            let routing_table = routing_table_lock
+                .read()
+                .expect("ITERATIVE_FIND_NODE: failed to read routing table");
             routing_table.find_closest_nodes(&target, K)
         };
 
@@ -733,7 +826,8 @@ impl Node {
                 if let Some(node) = candidates.pop_front() {
                     if queried.insert(node.get_id().to_vec()) {
                         parallel_requests.push(async move {
-                            timeout(Duration::from_millis(TIMEOUT), self.find_node(node, target)).await
+                            timeout(Duration::from_millis(TIMEOUT), self.find_node(node, target))
+                                .await
                         });
                     }
                 }
@@ -742,7 +836,9 @@ impl Node {
             while let Some(Ok(Ok(nodes))) = parallel_requests.next().await {
                 for node in nodes {
                     let it = node.get_id().to_vec();
-                    if !queried.contains(&it) && !candidates.iter().any(|n| n.get_id() == node.get_id()) {
+                    if !queried.contains(&it)
+                        && !candidates.iter().any(|n| n.get_id() == node.get_id())
+                    {
                         candidates.push_back(node.clone());
                     }
                     closest.push(node);
@@ -760,7 +856,9 @@ impl Node {
     pub async fn iterative_find_value(&self, key: [u8; KEY_LENGTH]) -> Option<Vec<u8>> {
         let mut closest: Vec<Node> = {
             let routing_table_lock = self.get_routing_table();
-            let routing_table = routing_table_lock.read().expect("ITERATIVE_FIND_VALUE: failed to read routing table");
+            let routing_table = routing_table_lock
+                .read()
+                .expect("ITERATIVE_FIND_VALUE: failed to read routing table");
             routing_table.find_closest_nodes(&key, K)
         };
 
@@ -774,7 +872,8 @@ impl Node {
                 if let Some(node) = candidates.pop_front() {
                     if queried.insert(node.get_id().to_vec()) {
                         parallel_requests.push(async move {
-                            timeout(Duration::from_millis(TIMEOUT), self.find_value(node, key)).await
+                            timeout(Duration::from_millis(TIMEOUT), self.find_value(node, key))
+                                .await
                         });
                     }
                 }
@@ -798,7 +897,9 @@ impl Node {
 
                 for node in nodes {
                     let id = node.get_id().to_vec();
-                    if !queried.contains(&id) && !candidates.iter().any(|n| n.get_id() == node.get_id()) {
+                    if !queried.contains(&id)
+                        && !candidates.iter().any(|n| n.get_id() == node.get_id())
+                    {
                         candidates.push_back(node.clone());
                     }
                     closest.push(node);
@@ -845,7 +946,13 @@ impl Node {
         }
     }
 
-    pub fn verify_pow(&self, node_id: &[u8], nonce: &[u8], pow_hash: &[u8], difficulty: usize) -> bool {
+    pub fn verify_pow(
+        &self,
+        node_id: &[u8],
+        nonce: &[u8],
+        pow_hash: &[u8],
+        difficulty: usize,
+    ) -> bool {
         let mut input = Vec::new();
         input.extend_from_slice(node_id);
         input.extend_from_slice(nonce);
@@ -854,7 +961,7 @@ impl Node {
         hasher.update(&input);
         let computed_hash = hasher.finalize();
 
-        computed_hash[..difficulty] == vec![0u8; difficulty][..] && computed_hash.as_slice() == pow_hash
+        computed_hash[..difficulty] == vec![0u8; difficulty][..]
+            && computed_hash.as_slice() == pow_hash
     }
-
 }
