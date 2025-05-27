@@ -1,16 +1,19 @@
+use std::collections::HashMap;
 use std::env;
 use std::io::{self, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::io::{self as tokio_io, AsyncBufReadExt};
-use tokio::sync::Notify;
-use tonic::Status;
+use blockchain::auction::auction::{collect_auctions, find_auction_transactions, Auction, AuctionStatus};
+use blockchain::auction::auction_commands::{generate_auction_id, tx_bid, tx_create_auction, tx_end_auction, tx_start_auction};
 use tonic::transport::Server;
-use blockchain::auction::auction_commands::AuctionCommand;
 use blockchain::kademlia::kademlia_proto::kademlia_server::KademliaServer;
 use blockchain::kademlia::node::Node;
 use blockchain::kademlia::service::KademliaService;
+use ed25519_dalek::Keypair;
+use rand::rngs::OsRng;
+use tokio::io::{self as tokio_io, AsyncBufReadExt};
+use tokio::sync::Notify;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,6 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shutdown_trigger = shutdown.clone();
     let service = KademliaService::new_with_shutdown(node.clone(), shutdown);
 
+    let keypair = Keypair::generate(&mut OsRng);
+    let nonce = Arc::new(std::sync::Mutex::new(0u64));
+
     let server = Server::builder()
         .add_service(KademliaServer::new(service))
         .serve_with_shutdown(address, async move {
@@ -41,20 +47,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::select! {
         result = server => result?,
-        result = menu(node.clone(), ip, address, bootstrap_address, difficulty) => result?,
+        result = menu(node.clone(), ip, address, bootstrap_address,difficulty, keypair, nonce) => result?,
     }
 
     println!("Shutting down...");
     Ok(())
 }
 
-async fn menu(node: Node, ip: IpAddr, address: SocketAddr, bootstrap_address: SocketAddr, difficulty: usize) -> Result<(), Box<dyn std::error::Error>> {
+async fn menu(
+    node: Node,
+    ip: IpAddr,
+    address: SocketAddr,
+    bootstrap_address: SocketAddr,
+    difficulty: usize,
+    keypair: Keypair,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     let bootstrap_node = Node::new(bootstrap_address);
-    if let Err(e) = node.join(bootstrap_node.clone(), difficulty).await {
-        eprintln!("JOIN error: {}", e);
-    }
+    node.join(bootstrap_node.clone(), difficulty).await?;
 
     let stdin = tokio_io::BufReader::new(tokio_io::stdin());
     let mut lines = stdin.lines();
@@ -68,9 +80,8 @@ async fn menu(node: Node, ip: IpAddr, address: SocketAddr, bootstrap_address: So
         println!("4. FIND VALUE");
         println!("5. WHO AM I?");
         println!("6. CREATE AUCTION");
-        println!("7. START AUCTION");
-        println!("8. END AUCTION");
-        println!("9. PLACE BID");
+        println!("7. LIST AUCTIONS");
+        println!("8. LIST MY AUCTIONS");
         print!("\nOption: ");
         io::stdout().flush().unwrap();
 
@@ -81,145 +92,448 @@ async fn menu(node: Node, ip: IpAddr, address: SocketAddr, bootstrap_address: So
 
         match input.as_str() {
             "0" => return Ok(()),
-            "1" => {
-                let port: u16 = prompt_parse("Target Port: ").await;
-                let target = Node::new(SocketAddr::new(ip, port));
-                match node.ping(&target).await {
-                    Ok(true) => println!("{} is alive!", target),
-                    _ => {
-                        println!("{} is not alive!", target);
-                        let routing_table_lock = node.get_routing_table();
-                        let mut routing_table = routing_table_lock.write().map_err(|_| {
-                            Status::internal("MAIN: failed to acquire lock on routing table")
-                        })?;
-                        routing_table.remove(&target);
-                    }
-                }
-            },
-            "2" => {
-                let key = prompt_hex("Key (40 hex chars): ").await;
-                let value = prompt("Value: ").await.into_bytes();
-                match key.try_into() {
-                    Ok(key_array) => match node.store(key_array, value).await {
-                        Ok(_) => println!("STORE successful!"),
-                        Err(e) => println!("STORE error: {}", e),
-                    },
-                    Err(_) => println!("Key must be exactly 40 hex characters (20 bytes)."),
-                }
-            },
-            "3" => {
-                let id = prompt_hex("Target ID (40 hex chars): ").await;
-                let port: u16 = prompt_parse("Target Port: ").await;
-                let target = Node::new(SocketAddr::new(ip, port));
-                match id.try_into() {
-                    Ok(id_array) => {
-                        match node.find_node(target, id_array).await {
-                            Ok(nodes) => {
-                                println!("FIND_NODE successful!");
-                                for node in nodes {
-                                    println!("{}", node);
-                                }
-                            }
-                            Err(e) => println!("FIND_NODE error: {}", e),
-                        };
-                    }
-                    Err(_) => println!("ID must be exactly 40 hex characters (20 bytes)."),
-                }
-            },
-            "4" => {
-                let key = prompt_hex("Key (40 hex chars): ").await;
-                let port: u16 = prompt_parse("Target Port: ").await;
-                let target = Node::new(SocketAddr::new(ip, port));
-                match key.try_into() {
-                    Ok(key_array) => {
-                        match node.find_value(target, key_array).await {
-                            Ok((Some(value), _)) => {
-                                println!("FIND_VALUE successful!");
-                                println!("Value: {:?}", String::from_utf8_lossy(&value));
-                            }
-                            Ok((None, nodes)) => {
-                                println!("Value not found. Closest nodes:");
-                                for node in nodes {
-                                    println!("{}", node);
-                                }
-                            }
-                            Err(e) => println!("FIND_VALUE error: {}", e),
-                        }
-                    }
-                    Err(_) => println!("Key must be exactly 40 hex characters (20 bytes)."),
-                }
-            },
-            "5" => {
-                println!("I am {}", node);
-                let routing_table_lock = node.get_routing_table();
-                let routing_table = routing_table_lock.read().map_err(|_| {
-                    Status::internal("MAIN: failed to acquire lock on routing table")
-                })?;
-                println!("{}", *routing_table);
-            },
-            "6" => {
-                let id = prompt("Auction ID: ").await;
-                let title = prompt("Title: ").await;
-                let description = prompt("Description: ").await;
-                let command = AuctionCommand::CreateAuction { id: id.clone(), title, description };
-
-                let serialized = format!("AUCTION_{}", serde_json::to_string(&command)?);
-                let key = sha256_truncate(&id);
-
-                match node.store(key, serialized.into_bytes()).await {
-                    Ok(_) => println!("Auction created and stored successfully!"),
-                    Err(e) => println!("Error storing auction: {}", e),
-                }
-            },
-            "7" => {
-                let id = prompt("Auction ID: ").await;
-                let command = AuctionCommand::StartAuction { id: id.clone() };
-
-                let serialized = format!("AUCTION_{}", serde_json::to_string(&command)?);
-                let key = sha256_truncate(&format!("{}_start", id));
-
-                match node.store(key, serialized.into_bytes()).await {
-                    Ok(_) => println!("Auction started successfully!"),
-                    Err(e) => println!("Error starting auction: {}", e),
-                }
-            },
-            "8" => {
-                let id = prompt("Auction ID: ").await;
-                let command = AuctionCommand::EndAuction { id: id.clone() };
-
-                let serialized = format!("AUCTION_{}", serde_json::to_string(&command)?);
-                let key = sha256_truncate(&format!("{}_end", id));
-
-                match node.store(key, serialized.into_bytes()).await {
-                    Ok(_) => println!("Auction ended successfully!"),
-                    Err(e) => println!("Error ending auction: {}", e),
-                }
-            },
-            "9" => {
-                let id = prompt("Auction ID: ").await;
-                let amount: u64 = prompt_parse("Bid amount (integer): ").await;
-                let command = AuctionCommand::Bid { id: id.clone(), amount };
-
-                let serialized = format!("AUCTION_{}", serde_json::to_string(&command)?);
-                let key = sha256_truncate(&format!("{}_bid_{}", id, amount));
-
-                match node.store(key, serialized.into_bytes()).await {
-                    Ok(_) => println!("Bid placed successfully!"),
-                    Err(e) => println!("Error placing bid: {}", e),
-                }
-            },
+            "1" => handle_ping(&node, ip).await?,
+            "2" => handle_store(&node).await?,
+            "3" => handle_find_node(&node, ip).await?,
+            "4" => handle_find_value(&node, ip).await?,
+            "5" => handle_whoami(&node, &keypair),
+            "6" => handle_create_auction(&node, &keypair, nonce.clone()).await?,
+            "7" => handle_list_auctions(&node, &keypair, nonce.clone()).await?,
+            "8" => handle_my_auctions(&node, &keypair, nonce.clone()).await?,
             _ => println!("Invalid option."),
         }
     }
 }
 
+async fn handle_ping(node: &Node, ip: IpAddr) -> Result<(), Box<dyn std::error::Error>> {
+    let port: u16 = prompt_parse("Target Port: ").await;
+    let target = Node::new(SocketAddr::new(ip, port));
+    let ok = node.ping(&target).await?;
+    println!("Alive: {}", ok);
+    Ok(())
+}
+
+async fn handle_store(node: &Node) -> Result<(), Box<dyn std::error::Error>> {
+    let key = prompt_hex("Key (40 hex chars): ").await;
+    let value = prompt("Value: ").await.into_bytes();
+    match key.try_into() {
+        Ok(key_array) => {
+            node.store(key_array, value).await?;
+            println!("Stored");
+        }
+        Err(_) => println!("Key must be exactly 40 hex characters (20 bytes)."),
+    }
+    Ok(())
+}
+
+async fn handle_find_node(node: &Node, ip: IpAddr) -> Result<(), Box<dyn std::error::Error>> {
+    let id = prompt_hex("Target ID (40 hex chars): ").await;
+    let port: u16 = prompt_parse("Target Port: ").await;
+    let target = Node::new(SocketAddr::new(ip, port));
+    match id.try_into() {
+        Ok(id_array) => {
+            let nodes = node.find_node(target, id_array).await?;
+            for n in nodes {
+                println!("Node ID: {:02x?} @ {}", n.get_id(), n.get_address());
+            }
+        }
+        Err(_) => println!("ID must be exactly 40 hex characters (20 bytes)."),
+    }
+    Ok(())
+}
+
+async fn handle_find_value(node: &Node, ip: IpAddr) -> Result<(), Box<dyn std::error::Error>> {
+    let key = prompt_hex("Key (40 hex chars): ").await;
+    let port: u16 = prompt_parse("Target Port: ").await;
+    let target = Node::new(SocketAddr::new(ip, port));
+    match key.try_into() {
+        Ok(key_array) => {
+            let (value, nodes) = node.find_value(target, key_array).await?;
+            match value {
+                Some(v) => println!("Value: {:?}", String::from_utf8_lossy(&v)),
+                None => {
+                    println!("Value not found. Closest nodes:");
+                    for n in nodes {
+                        println!("Node ID: {:02x?} @ {}", n.get_id(), n.get_address());
+                    }
+                }
+            }
+        }
+        Err(_) => println!("Key must be exactly 40 hex characters (20 bytes)."),
+    }
+    Ok(())
+}
+
+fn handle_whoami(node: &Node, keypair: &Keypair) {
+    println!("ID: {:02x?}", node.get_id());
+    println!("IP: {}", node.get_address());
+    println!("Public Key: {:02x?}", keypair.public.to_bytes());
+}
+
+async fn handle_create_auction(
+    node: &Node,
+    keypair: &Keypair,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let title = prompt("Auction Title: ").await;
+    let description = prompt("Auction Description: ").await;
+
+    let mut nonce_lock = nonce.lock().unwrap();
+    match tx_create_auction(keypair, title.clone(), description.clone(), *nonce_lock) {
+        Ok(transaction) => {
+            let auction_id = generate_auction_id(&keypair.public.to_bytes(), &title, &description, *nonce_lock);
+            let tx_pool = node.get_transaction_pool();
+            let mut tx_pool_guard = tx_pool.lock().unwrap();
+            match tx_pool_guard.add_transaction(transaction) {
+                Ok(_) => {
+                    println!("Auction created successfully!");
+                    println!("Auction ID: {}", auction_id);
+                    println!("Title: {}", title);
+                    println!("Description: {}", description);
+                    *nonce_lock += 1;
+                }
+                Err(e) => println!("Failed to add auction to transaction pool: {}", e),
+            }
+        }
+        Err(e) => println!("Failed to create auction transaction: {}", e),
+    }
+    Ok(())
+}
+
+async fn handle_list_auctions(
+    node: &Node,
+    keypair: &Keypair,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let blockchain = node.get_blockchain();
+    let blockchain_data = {
+        let guard = blockchain.read().unwrap();
+        (*guard).clone()
+    };
+
+    let auction_txs = find_auction_transactions(&blockchain_data);
+    let auctions = collect_auctions(&auction_txs.into_iter().cloned().collect::<Vec<_>>());
+    
+    if auctions.is_empty() {
+        println!("No auctions found.");
+        println!("Create some auctions first using option 6.");
+        return Ok(());
+    }
+
+    println!("Found {} auction(s):\n", auctions.len());
+    
+    for (id, auction) in &auctions {
+        let status_emoji = match auction.status {
+            AuctionStatus::Pending => "⏳",
+            AuctionStatus::Active => "🟢",
+            AuctionStatus::Ended => "🔴",
+        };
+        
+        println!("{} Auction ID: {}", status_emoji, id);
+        println!("   Title: {}", auction.title);
+        println!("   Status: {:?}", auction.status);
+        println!("   Owner: {:02x?}", &auction.owner[..8]);
+        
+        if let Some((amount, bidder)) = &auction.highest_bid {
+            println!("   Highest Bid: {} by {:02x?}", amount, &bidder[..8]);
+        } else {
+            println!("   Highest Bid: None");
+        }
+        println!();
+    }
+
+    auction_submenu(&auctions, keypair, nonce).await?;
+    Ok(())
+}
+
+async fn auction_submenu(
+    auctions: &HashMap<String, Auction>,
+    keypair: &Keypair,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stdin = tokio_io::BufReader::new(tokio_io::stdin());
+    let mut lines = stdin.lines();
+
+    loop {
+        println!("=== AUCTION ACTIONS ===");
+        println!("0. Back to main menu");
+        println!("B. Place a bid");
+        print!("\nOption: ");
+        io::stdout().flush().unwrap();
+
+        let input = match lines.next_line().await? {
+            Some(line) => line.trim().to_uppercase(),
+            None => continue,
+        };
+
+        match input.as_str() {
+            "0" => break,
+            "B" => handle_bid(auctions, keypair, nonce.clone()).await?,
+            _ => println!("Invalid option."),
+        }
+    }
+    Ok(())
+}
+
+async fn handle_bid(
+    auctions: &HashMap<String, Auction>,
+    keypair: &Keypair,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if auctions.is_empty() {
+        println!("No auctions available for bidding.");
+        return Ok(());
+    }
+
+    let auction_id = prompt("Enter auction ID to bid on: ").await;
+    
+    match auctions.get(&auction_id) {
+        Some(auction) => {
+            match auction.status {
+                AuctionStatus::Ended => {
+                    println!("This auction has ended. Cannot place bid.");
+                    return Ok(());
+                }
+                AuctionStatus::Pending => {
+                    println!("This auction is still pending. Cannot place bid yet.");
+                    return Ok(());
+                }
+                AuctionStatus::Active => {}
+            }
+        
+            let my_public_key = keypair.public.to_bytes();
+            if auction.owner == my_public_key {
+                println!("You cannot bid on your own auction.");
+                return Ok(());
+            }
+        
+            println!("\n📋 Bidding on: {}", auction.title);
+            println!("🆔 Auction ID: {}", auction_id);
+            if let Some((current_bid, _)) = &auction.highest_bid {
+                println!("💰 Current highest bid: {}", current_bid);
+                println!("💡 Your bid must be higher than {}", current_bid);
+            } else {
+                println!("💰 No bids yet - you can place the first bid!");
+            }
+        
+            let bid_amount: u64 = prompt_parse("Enter your bid amount: ").await;
+        
+            if let Some((current_highest, _)) = &auction.highest_bid {
+                if bid_amount <= *current_highest {
+                    println!("Bid must be higher than current highest bid of {}", current_highest);
+                    return Ok(());
+                }
+            }
+
+            let mut nonce_lock = nonce.lock().unwrap();
+            if let Err(e) = tx_bid(keypair, auction_id, bid_amount, *nonce_lock){
+                eprintln!("Failed to bid on auction: {:?}", e);
+            }
+            else{
+                *nonce_lock += 1;
+                println!("Bid placed successfully!");
+            }
+        }
+        None => println!("Invalid auction ID"),
+    }
+    Ok(())
+}
+
+async fn handle_my_auctions(
+    node: &Node,
+    keypair: &Keypair,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!(" Finding your auctions...");
+    
+    let blockchain = node.get_blockchain();
+    let blockchain_data = {
+        let guard = blockchain.read().unwrap();
+        (*guard).clone()
+    };
+
+    let auction_txs = find_auction_transactions(&blockchain_data);
+    let auctions = collect_auctions(&auction_txs.into_iter().cloned().collect::<Vec<_>>());
+    let my_public_key = keypair.public.to_bytes();
+
+    let my_auctions: HashMap<String, Auction> = auctions
+        .into_iter()
+        .filter(|(_, auction)| auction.owner == my_public_key)
+        .collect();
+    
+    if my_auctions.is_empty() {
+        println!("You haven't created any auctions yet.");
+        println!("Create an auction using option 6.");
+        return Ok(());
+    }
+
+    println!("You have {} auction(s):\n", my_auctions.len());
+    
+    for (id, auction) in &my_auctions {
+        let status_emoji = match auction.status {
+            AuctionStatus::Pending => "⏳",
+            AuctionStatus::Active => "🟢",
+            AuctionStatus::Ended => "🔴",
+        };
+        
+        println!("{} Your Auction ID: {}", status_emoji, id);
+        println!("   Title: {}", auction.title);
+        println!("   Status: {:?}", auction.status);
+        
+        if let Some((amount, bidder)) = &auction.highest_bid {
+            println!("   Highest Bid: {} by {:02x?}", amount, &bidder[..8]);
+        } else {
+            println!("   Highest Bid: None");
+        }
+        println!();
+    }
+
+    my_auctions_submenu(&my_auctions, keypair, nonce).await?;
+    Ok(())
+}
+
+async fn my_auctions_submenu(
+    my_auctions: &HashMap<String, Auction>,
+    keypair: &Keypair,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stdin = tokio_io::BufReader::new(tokio_io::stdin());
+    let mut lines = stdin.lines();
+
+    loop {
+        println!("=== AUCTION MANAGEMENT ===");
+        println!("0. Back to main menu");
+        println!("S. Start an auction");
+        println!("E. End an auction");
+        print!("\nOption: ");
+        io::stdout().flush().unwrap();
+
+        let input = match lines.next_line().await? {
+            Some(line) => line.trim().to_uppercase(),
+            None => continue,
+        };
+
+        match input.as_str() {
+            "0" => break,
+            "S" => handle_start_auction(my_auctions, keypair, nonce.clone()).await?,
+            "E" => handle_end_auction(my_auctions, keypair, nonce.clone()).await?,
+            _ => println!("Invalid option."),
+        }
+    }
+    Ok(())
+}
+
+async fn handle_start_auction(
+    my_auctions: &HashMap<String, Auction>,
+    keypair: &Keypair,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let startable_auctions: HashMap<String, Auction> = my_auctions
+        .iter()
+        .filter(|(_, auction)| matches!(auction.status, AuctionStatus::Pending))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    if startable_auctions.is_empty() {
+        println!("No auctions available to start.");
+        println!("Only pending auctions can be started.");
+        return Ok(());
+    }
+
+    println!("\n📋 Auctions you can start:");
+    for (id, auction) in &startable_auctions {
+        println!("⏳ ID: {} - Title: {}", id, auction.title);
+    }
+
+    let auction_id = prompt("Enter auction ID to start: ").await;
+
+    match startable_auctions.get(&auction_id) {
+        Some(auction) => {
+            println!("\nStarting auction: {}", auction.title);
+            println!("Auction ID: {}", auction_id);
+
+            let mut nonce_lock = nonce.lock().unwrap();
+            if let Err(e) = tx_start_auction(keypair, auction_id, *nonce_lock){
+                eprintln!("Failed to start auction: {:?}", e);
+            }
+            else{
+                *nonce_lock += 1;
+                println!("Auction started successfully!");
+            }
+        }
+        None => {
+            println!("Auction ID '{}' not found or cannot be started.", auction_id);
+        }
+    }
+    Ok(())
+}
+
+async fn handle_end_auction(
+    my_auctions: &HashMap<String, Auction>,
+    keypair: &Keypair,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let endable_auctions: HashMap<String, Auction> = my_auctions
+        .iter()
+        .filter(|(_, auction)| matches!(auction.status, AuctionStatus::Active))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    if endable_auctions.is_empty() {
+        println!("No auctions available to end.");
+        println!("Only active auctions can be ended.");
+        return Ok(());
+    }
+
+    println!("\nAuctions you can end:");
+    for (id, auction) in &endable_auctions {
+        let bid_info = if let Some((amount, _)) = &auction.highest_bid {
+            format!(" - Highest Bid: {}", amount)
+        } else {
+            " - No bids".to_string()
+        };
+        println!("ID: {} - Title: {}{}", id, auction.title, bid_info);
+    }
+
+    let auction_id = prompt("Enter auction ID to end: ").await;
+
+    match endable_auctions.get(&auction_id) {
+        Some(auction) => {
+            println!("\nEnding auction: {}", auction.title);
+            println!("Auction ID: {}", auction_id);
+
+            if let Some((amount, bidder)) = &auction.highest_bid {
+                println!("Winner: {:02x?}", &bidder[..8]);
+                println!("Winning bid: {}", amount);
+            } else {
+                println!("No bids were placed on this auction.");
+            }
+
+            let confirm = prompt("Are you sure you want to end this auction? (y/N): ").await;
+            if confirm.to_lowercase() == "y" || confirm.to_lowercase() == "yes" {
+                let mut nonce_lock = nonce.lock().unwrap();
+            if let Err(e) =  tx_end_auction(keypair, auction_id, *nonce_lock){
+                eprintln!("Failed to end auction: {:?}", e);
+            }
+            else{
+                *nonce_lock += 1;
+                println!("Auction ended successfully!");
+            }
+            }
+        }
+        None => {
+            println!("Auction ID '{}' not found or cannot be ended.", auction_id);
+        }
+    }
+    Ok(())
+}
+
 async fn prompt(msg: &str) -> String {
     print!("{}", msg);
     io::stdout().flush().unwrap();
-
+    let mut stdin = tokio_io::BufReader::new(tokio_io::stdin());
     let mut input = String::new();
-    let mut reader = tokio_io::BufReader::new(tokio_io::stdin());
-    reader.read_line(&mut input).await.unwrap();
+    stdin.read_line(&mut input).await.unwrap();
     input.trim().to_string()
 }
 
@@ -242,14 +556,3 @@ async fn prompt_parse<T: FromStr>(msg: &str) -> T {
         }
     }
 }
-
-fn sha256_truncate(input: &str) -> [u8; 20] {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    let result = hasher.finalize();
-    let mut hash = [0u8; 20];
-    hash.copy_from_slice(&result[..20]);
-    hash
-}
-
