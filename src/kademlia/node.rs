@@ -18,7 +18,8 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt;
+use std::path::Path;
+use std::{fmt, fs};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -63,17 +64,23 @@ pub enum BlockchainMessage {
     ResponseTransactionPool { transactions: Vec<Transaction> },
 }
 
+#[derive(Serialize, Deserialize)]
+struct StoredKeyData {
+    public_key: [u8; CRYPTO_KEY_LENGTH],
+    private_key: [u8; CRYPTO_KEY_LENGTH],
+}
+
 impl Node {
     pub fn new(address: SocketAddr) -> Self {
-        let keypair = Keypair::generate(&mut OsRng);
-        let hash = Sha256::digest(keypair.public.to_bytes());
+        let (public_key, private_key) = Self::get_or_create_keypair(address);        
+        let hash = Sha256::digest(public_key);
         let id = hash[..ID_LENGTH]
             .try_into()
             .expect("SHA-256 hash length must be 160 bits (20 bytes)");
 
         Self {
-            public_key: keypair.public.to_bytes(),
-            private_key: keypair.secret.to_bytes(),
+            public_key: public_key,
+            private_key: private_key,
             id,
             address,
             routing_table: Arc::new(RwLock::new(RoutingTable::new(id))),
@@ -85,11 +92,11 @@ impl Node {
     }
 
     pub fn new_with_id(address: SocketAddr, id: [u8; ID_LENGTH]) -> Self {
-        let keypair = Keypair::generate(&mut OsRng);
+        let (public_key, private_key) = Self::get_or_create_keypair(address);        
 
         Self {
-            public_key: keypair.public.to_bytes(),
-            private_key: keypair.secret.to_bytes(),
+            public_key: public_key,
+            private_key: private_key,
             id,
             address,
             routing_table: Arc::new(RwLock::new(RoutingTable::new(id))),
@@ -100,7 +107,56 @@ impl Node {
         }
     }
 
-    fn get_keypair(&self) -> Result<Keypair, &'static str> {
+    fn get_or_create_keypair(address: SocketAddr) -> ([u8; CRYPTO_KEY_LENGTH], [u8; CRYPTO_KEY_LENGTH]) {
+        let ip_str = address.ip().to_string().replace(":", "_");
+        let key_file_path = format!("keys/{}_{}.json", ip_str, address.port());
+        
+        if let Ok(existing_keys) = Self::load_keypair_from_file(&key_file_path) {
+            println!("Loaded existing keypair for port {} and ip {}", address.port(), address.ip());
+            return existing_keys;
+        }
+        
+        println!("Generating new keypair for port {} and ip {}", address.port(), address.ip());
+        let keypair = Keypair::generate(&mut OsRng);
+        let public_key = keypair.public.to_bytes();
+        let private_key = keypair.secret.to_bytes();
+        
+        if let Err(e) = Self::save_keypair_to_file(&key_file_path, &public_key, &private_key) {
+            println!("Warning: Failed to save keypair to file: {}", e);
+        }
+        
+        (public_key, private_key)
+    }
+    
+    fn load_keypair_from_file(file_path: &str) -> Result<([u8; CRYPTO_KEY_LENGTH], [u8; CRYPTO_KEY_LENGTH]), Box<dyn std::error::Error>> {
+        let contents = fs::read_to_string(file_path)?;
+        let stored_data: StoredKeyData = serde_json::from_str(&contents)?;
+        Ok((stored_data.public_key, stored_data.private_key))
+    }
+    
+    fn save_keypair_to_file(
+        file_path: &str, 
+        public_key: &[u8; CRYPTO_KEY_LENGTH], 
+        private_key: &[u8; CRYPTO_KEY_LENGTH]
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Create directory if it doesn't exist
+        if let Some(parent) = Path::new(file_path).parent() {
+            fs::create_dir_all(parent)?;
+        }
+        
+        let stored_data = StoredKeyData {
+            public_key: *public_key,
+            private_key: *private_key,
+        };
+        
+        let json_data = serde_json::to_string_pretty(&stored_data)?;
+        fs::write(file_path, json_data)?;
+        
+        println!("Saved keypair to {}", file_path);
+        Ok(())
+    }
+
+    pub fn get_keypair(&self) -> Result<Keypair, &'static str> {
         let secret =
             DalekSecretKey::from_bytes(&self.private_key).map_err(|_| "Invalid private key")?;
         let public =
@@ -602,7 +658,6 @@ impl Node {
                         println!("Failed to process new block: {}", e);
                     }
                 }
-
                 _ => {
                     println!("DEBUG: Other blockchain message type");
                 }

@@ -11,7 +11,6 @@ use blockchain::kademlia::kademlia_proto::kademlia_server::KademliaServer;
 use blockchain::kademlia::node::Node;
 use blockchain::kademlia::service::KademliaService;
 use ed25519_dalek::Keypair;
-use rand::rngs::OsRng;
 use tokio::io::{self as tokio_io, AsyncBufReadExt};
 use tokio::sync::Notify;
 
@@ -36,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shutdown_trigger = shutdown.clone();
     let service = KademliaService::new_with_shutdown(node.clone(), shutdown);
 
-    let keypair = Keypair::generate(&mut OsRng);
+    let keypair = node.clone().get_keypair()?;
     let nonce = Arc::new(std::sync::Mutex::new(0u64));
 
     let server = Server::builder()
