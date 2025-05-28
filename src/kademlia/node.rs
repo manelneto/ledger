@@ -220,21 +220,52 @@ impl Node {
             pool.get_transactions_4_block(MAX_TRANSACTIONS_PER_BLOCK)
         };
 
+        // Debug: Print what transactions we're trying to mine
+        println!(
+            "DEBUG: Retrieved {} transactions from pool for mining",
+            transactions.len()
+        );
+        for (i, tx) in transactions.iter().enumerate() {
+            println!(
+                "  TX {}: {} (valid: {})",
+                i + 1,
+                hex::encode(&tx.tx_hash[..8]),
+                tx.verify()
+            );
+        }
+
         let mut block = {
             let blockchain = self.blockchain.read().unwrap();
             blockchain.create_block(transactions)?
         };
+
+        // Debug: Print what transactions are in the block before mining
+        println!(
+            "DEBUG: Block created with {} transactions",
+            block.transactions.len()
+        );
 
         {
             let blockchain = self.blockchain.read().unwrap();
             blockchain.mine_block(&mut block)?;
         }
 
+        // Debug: Print what transactions are in the block after mining
+        println!(
+            "DEBUG: Block mined with {} transactions",
+            block.transactions.len()
+        );
+        for (i, tx) in block.transactions.iter().enumerate() {
+            println!("  Block TX {}: {}", i + 1, hex::encode(&tx.tx_hash[..8]));
+        }
+
+        // IMPORTANT: Only add the block if mining was successful
         {
             let mut blockchain = self.blockchain.write().unwrap();
             blockchain.add_block(block.clone())?;
         }
 
+        // IMPORTANT: Only remove transactions from pool AFTER the block is successfully added
         {
             let mut pool = self.transaction_pool.lock().unwrap();
             pool.process_block(&block.transactions);
@@ -312,30 +343,43 @@ impl Node {
             return;
         }
 
+        println!("Found {} nodes for sync", nodes.len());
+
         let mut sync_futures = FuturesUnordered::new();
 
         for node in nodes.iter().take(MAX_NODES_TO_SYNC) {
             if node.get_id() != self.get_id() {
+                println!("Requesting blockchain from {}", node.get_address());
                 sync_futures.push(self.request_full_blockchain(node.clone()));
             }
         }
 
         let mut best_blockchain: Option<Blockchain> = None;
         let mut best_height = current_height;
+        let mut successful_syncs = 0;
 
         while let Some(result) = sync_futures.next().await {
             match result {
                 Ok(blockchain) => {
                     let height = blockchain.get_block_height();
-                    println!("Received blockchain with height: {}", height);
+                    println!("Successfully received blockchain with height: {}", height);
+                    successful_syncs += 1;
 
-                    // Accept ANY blockchain that's valid, even if same height (to sync genesis)
-                    if blockchain.is_chain_valid(None)
-                        && (height > best_height || best_blockchain.is_none())
-                    {
-                        best_height = height;
-                        best_blockchain = Some(blockchain);
-                        println!("Found blockchain with height {}", height);
+                    // Accept blockchain if it's valid and has more blocks
+                    if blockchain.is_chain_valid(None) {
+                        if height > best_height {
+                            println!("Found better blockchain with height {}", height);
+                            best_height = height;
+                            best_blockchain = Some(blockchain);
+                        } else if height == best_height && best_blockchain.is_none() {
+                            println!(
+                                "Found blockchain with same height {} (better than current {})",
+                                height, current_height
+                            );
+                            best_blockchain = Some(blockchain);
+                        }
+                    } else {
+                        println!("Received invalid blockchain - rejecting");
                     }
                 }
                 Err(e) => {
@@ -344,15 +388,30 @@ impl Node {
             }
         }
 
+        println!(
+            "Sync completed: {} successful syncs out of {} attempts",
+            successful_syncs, MAX_NODES_TO_SYNC
+        );
+
         if let Some(blockchain) = best_blockchain {
+            println!(
+                "Updating blockchain from height {} to {}",
+                current_height, best_height
+            );
             let mut current_blockchain = self.blockchain.write().unwrap();
             *current_blockchain = blockchain;
-            println!("Successfully synced blockchain with height {}", best_height);
 
             let mut pool = self.transaction_pool.lock().unwrap();
             pool.clear(); // Clear the transaction pool after sync
+
+            println!("Successfully synced blockchain to height {}", best_height);
+        } else if successful_syncs > 0 {
+            println!(
+                "Received {} blockchain(s) but none were better than current",
+                successful_syncs
+            );
         } else {
-            println!("No blockchain found during sync.");
+            println!("No valid blockchains received during sync - keeping current blockchain");
         }
     }
 
@@ -362,53 +421,192 @@ impl Node {
     ) -> Result<Blockchain, Box<dyn std::error::Error>> {
         println!("Requesting full blockchain from {}", node.get_address());
 
-        let message = BlockchainMessage::RequestFullBlockchain;
-        let request_data = serde_json::to_vec(&message)?;
-
-        // Use a unique key for blockchain requests
+        // Create a unique key that includes both node IDs and timestamp to avoid collisions
         let request_key = {
             let mut hasher = Sha256::new();
-            hasher.update(b"blockchain_request");
+            hasher.update(b"blockchain_request_v2"); // Version to avoid old keys
             hasher.update(&self.id);
+            hasher.update(&node.get_id());
             hasher.update(&crate::ledger::lib::now().to_be_bytes());
+            // Add some randomness
+            hasher.update(&rand::random::<[u8; 8]>());
             let hash = hasher.finalize();
             hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH])
         };
 
-        // Store the request
-        self.store_at(&node, request_key, request_data).await?;
+        // Create response key (where we expect the response)
+        let response_key = {
+            let mut hasher = Sha256::new();
+            hasher.update(b"blockchain_response_v2");
+            hasher.update(&request_key);
+            let hash = hasher.finalize();
+            hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH])
+        };
 
-        // Wait a bit and then try to retrieve the response
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        println!("DEBUG: Using request key: {:02x?}", &request_key[..8]);
+        println!("DEBUG: Expecting response key: {:02x?}", &response_key[..8]);
 
-        let (response_data, _) = self.find_value(node, request_key).await?;
+        // Store the request with the response key embedded
+        let request_with_response_key = format!("REQUEST:{}", hex::encode(&response_key));
+        self.store_at(&node, request_key, request_with_response_key.into_bytes())
+            .await?;
 
-        if let Some(data) = response_data {
-            if let Ok(message) = serde_json::from_slice::<BlockchainMessage>(&data) {
-                match message {
-                    BlockchainMessage::ResponseFullBlockchain { blockchain } => {
-                        println!(
-                            "Received full blockchain with {} blocks",
-                            blockchain.get_block_height()
-                        );
-                        return Ok(blockchain);
+        // Wait for response to be processed and stored
+        tokio::time::sleep(Duration::from_millis(3000)).await;
+
+        // Try to retrieve the response multiple times
+        for attempt in 1..=3 {
+            println!("DEBUG: Attempt {} to retrieve blockchain response", attempt);
+
+            match self.find_value(node.clone(), response_key).await {
+                Ok((Some(data), _)) => {
+                    println!("DEBUG: Retrieved response data of {} bytes", data.len());
+
+                    // Try to deserialize the response
+                    match serde_json::from_slice::<BlockchainMessage>(&data) {
+                        Ok(message) => match message {
+                            BlockchainMessage::ResponseFullBlockchain { blockchain } => {
+                                println!(
+                                    "Successfully received full blockchain with {} blocks",
+                                    blockchain.get_block_height()
+                                );
+                                return Ok(blockchain);
+                            }
+                            other => {
+                                println!(
+                                    "DEBUG: Unexpected message type in response: {:?}",
+                                    std::mem::discriminant(&other)
+                                );
+                            }
+                        },
+                        Err(e) => {
+                            println!(
+                                "DEBUG: Failed to deserialize response (attempt {}): {}",
+                                attempt, e
+                            );
+                            if data.len() < 200 {
+                                println!(
+                                    "DEBUG: Response data: {:?}",
+                                    String::from_utf8_lossy(&data)
+                                );
+                            }
+                        }
                     }
-                    _ => return Err("Unexpected message type".into()),
+                }
+                Ok((None, _)) => {
+                    println!("DEBUG: No response found (attempt {})", attempt);
+                }
+                Err(e) => {
+                    println!(
+                        "DEBUG: Error retrieving response (attempt {}): {}",
+                        attempt, e
+                    );
+                }
+            }
+
+            if attempt < 3 {
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+            }
+        }
+
+        Err("Failed to receive valid blockchain response after 3 attempts".into())
+    }
+
+    pub async fn handle_blockchain_message(&self, data: &[u8]) -> Option<Vec<u8>> {
+        // Check if this is a new-style request with response key
+        if let Ok(text) = std::str::from_utf8(data) {
+            if text.starts_with("REQUEST:") {
+                let response_key_hex = &text[8..]; // Remove "REQUEST:" prefix
+                if let Ok(response_key_bytes) = hex::decode(response_key_hex) {
+                    if response_key_bytes.len() == KEY_LENGTH {
+                        println!(
+                            "Received new-style blockchain request, response key: {:02x?}",
+                            &response_key_bytes[..8]
+                        );
+
+                        let blockchain = self.blockchain.read().unwrap().clone();
+
+                        // Create simplified blockchain to avoid serialization issues
+                        let safe_blockchain = Blockchain {
+                            blocks: blockchain.blocks.clone(),
+                            difficulty: blockchain.difficulty,
+                            forks: HashMap::new(), // Clear forks to avoid serialization issues
+                            balances: HashMap::new(), // Clear balances to avoid key serialization issues
+                        };
+
+                        let response = BlockchainMessage::ResponseFullBlockchain {
+                            blockchain: safe_blockchain,
+                        };
+
+                        match serde_json::to_vec(&response) {
+                            Ok(response_data) => {
+                                println!(
+                                    "Prepared blockchain response ({} bytes)",
+                                    response_data.len()
+                                );
+
+                                // Store the response at the specified key
+                                let response_key: [u8; KEY_LENGTH] =
+                                    response_key_bytes.try_into().unwrap();
+                                tokio::spawn({
+                                    let node = self.clone();
+                                    async move {
+                                        let storage = node.get_storage();
+                                        let mut storage_guard = storage.write().unwrap();
+                                        storage_guard.insert(response_key, response_data);
+                                        println!(
+                                            "Stored blockchain response at key: {:02x?}",
+                                            &response_key[..8]
+                                        );
+                                    }
+                                });
+
+                                return Some(b"OK".to_vec()); // Acknowledge the request
+                            }
+                            Err(e) => {
+                                println!("Failed to serialize blockchain response: {}", e);
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        Err("Failed to receive blockchain response".into())
-    }
-
-    pub async fn handle_blockchain_message(&self, data: &[u8]) -> Option<Vec<u8>> {
+        // Try to parse as a blockchain message (legacy handling)
         if let Ok(message) = serde_json::from_slice::<BlockchainMessage>(data) {
+            println!(
+                "DEBUG: Handling legacy blockchain message: {:?}",
+                std::mem::discriminant(&message)
+            );
+
             match message {
                 BlockchainMessage::RequestFullBlockchain => {
-                    println!("Received request for full blockchain");
+                    println!("Received legacy blockchain request - preparing response");
                     let blockchain = self.blockchain.read().unwrap().clone();
-                    let response = BlockchainMessage::ResponseFullBlockchain { blockchain };
-                    return serde_json::to_vec(&response).ok();
+
+                    let safe_blockchain = Blockchain {
+                        blocks: blockchain.blocks.clone(),
+                        difficulty: blockchain.difficulty,
+                        forks: HashMap::new(),
+                        balances: HashMap::new(),
+                    };
+
+                    let response = BlockchainMessage::ResponseFullBlockchain {
+                        blockchain: safe_blockchain,
+                    };
+
+                    match serde_json::to_vec(&response) {
+                        Ok(response_data) => {
+                            println!(
+                                "Legacy blockchain response prepared ({} bytes)",
+                                response_data.len()
+                            );
+                            return Some(response_data);
+                        }
+                        Err(e) => {
+                            println!("Failed to serialize legacy blockchain response: {}", e);
+                        }
+                    }
                 }
 
                 BlockchainMessage::NewBlock { block } => {
@@ -428,32 +626,17 @@ impl Node {
                     }
                 }
 
-                BlockchainMessage::ResponseFullBlockchain { blockchain } => {
-                    // NEW: Handle blockchain response by replacing current blockchain
-                    println!(
-                        "Received blockchain response with {} blocks",
-                        blockchain.get_block_height()
-                    );
-                    let current_height = {
-                        let current_blockchain = self.blockchain.read().unwrap();
-                        current_blockchain.get_block_height()
-                    };
-
-                    if blockchain.get_block_height() > current_height
-                        && blockchain.is_chain_valid(None)
-                    {
-                        let mut our_blockchain = self.blockchain.write().unwrap();
-                        *our_blockchain = blockchain;
-                        println!(
-                            "Replaced blockchain with {} blocks",
-                            our_blockchain.get_block_height()
-                        );
-                    }
+                _ => {
+                    println!("DEBUG: Other blockchain message type");
                 }
-
-                _ => {}
             }
+        } else {
+            println!(
+                "DEBUG: Could not parse as blockchain message - {} bytes",
+                data.len()
+            );
         }
+
         None
     }
 

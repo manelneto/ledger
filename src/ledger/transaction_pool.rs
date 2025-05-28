@@ -1,10 +1,9 @@
 use crate::ledger::transaction::{NonceTracker, PublicKey, Transaction, TransactionType, TxHash};
 use std::collections::{BTreeMap, HashMap};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const MAX_POOL_SIZE: usize = 10000;
 const MAX_TXS_PER_SENDER: usize = 50;
-const TX_EXPIRY_TIME: Duration = Duration::from_secs(3600);
 const MIN_FEE_RATE: u64 = 0;
 
 #[derive(Clone)]
@@ -34,8 +33,6 @@ impl TransactionPool {
     }
 
     pub fn add_transaction(&mut self, tx: Transaction) -> Result<(), &'static str> {
-        self.expire_transactions();
-
         if self.transactions.len() >= MAX_POOL_SIZE {
             self.remove_lowest_fee_transaction()?;
         }
@@ -168,21 +165,36 @@ impl TransactionPool {
             }
 
             let sender = &tx.data.sender;
-            let default_nonce = self.nonce_tracker.get_nonce(sender);
-            let expected_nonce = sender_nonces.get(sender).unwrap_or(&default_nonce);
 
-            if tx.data.nonce != expected_nonce + 1 {
-                continue;
-            }
+            // Get the expected nonce for this sender
+            let base_nonce = self.nonce_tracker.get_nonce(sender);
+            let current_nonce = sender_nonces.get(sender).unwrap_or(&base_nonce);
+            let expected_nonce = current_nonce + 1;
 
-            selected.push(tx.clone());
-            total_size += tx_size;
-            total_gas += tx_gas;
+            println!(
+                "DEBUG: TX nonce={}, expected={}, base={}",
+                tx.data.nonce, expected_nonce, base_nonce
+            );
 
-            sender_nonces.insert(sender.clone(), tx.data.nonce);
+            // For auction transactions with nonce 1, we might need to be more lenient
+            // Check if this is the first transaction from this sender
+            if tx.data.nonce == expected_nonce || (base_nonce == 0 && tx.data.nonce == 1) {
+                selected.push(tx.clone());
+                total_size += tx_size;
+                total_gas += tx_gas;
 
-            if selected.len() >= 1000 {
-                break;
+                sender_nonces.insert(sender.clone(), tx.data.nonce);
+
+                println!("DEBUG: Selected transaction with nonce {}", tx.data.nonce);
+
+                if selected.len() >= 1000 {
+                    break;
+                }
+            } else {
+                println!(
+                    "DEBUG: Skipped transaction - nonce mismatch. Got {}, expected {}",
+                    tx.data.nonce, expected_nonce
+                );
             }
         }
 
@@ -190,22 +202,36 @@ impl TransactionPool {
     }
 
     pub fn get_transactions_4_block(&self, max_transactions: usize) -> Vec<Transaction> {
-        self.get_transactions_for_block(max_transactions * 500, 1000000)
-    }
+        println!(
+            "DEBUG: Getting transactions for block, pool has {} transactions",
+            self.transactions.len()
+        );
 
-    fn expire_transactions(&mut self) {
-        let now = Instant::now();
-        let mut expired_hashes = Vec::new();
-
+        // Debug: Show all transactions in pool
         for (hash, pool_tx) in &self.transactions {
-            if now.duration_since(pool_tx.added_at) > TX_EXPIRY_TIME {
-                expired_hashes.push(hash.clone());
-            }
+            let tx = &pool_tx.transaction;
+            println!(
+                "  Pool TX: {} (valid: {}, fee: {}, nonce: {})",
+                hex::encode(&hash[..8]),
+                tx.verify(),
+                tx.data.fee,
+                tx.data.nonce
+            );
         }
 
-        for hash in expired_hashes {
-            self.remove_transaction(&hash);
+        let result = self.get_transactions_for_block(max_transactions * 500, 1000000);
+
+        println!("DEBUG: Selected {} transactions for block", result.len());
+        for (i, tx) in result.iter().enumerate() {
+            println!(
+                "  Selected TX {}: {} (valid: {})",
+                i + 1,
+                hex::encode(&tx.tx_hash[..8]),
+                tx.verify()
+            );
         }
+
+        result
     }
 
     fn remove_lowest_fee_transaction(&mut self) -> Result<(), &'static str> {
