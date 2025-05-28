@@ -10,7 +10,7 @@ use crate::ledger::merkle_tree::{MerkleTree, MerkleProof};
 use serde::{Serialize, Deserialize};
 
 const DIFFICULTY_PREFIX: &str = "0000";
-const MAX_BLOCK_TIME: u128 = 600_000; // 10 minutes
+const MAX_BLOCK_TIME: u128 = 3600_000; // 1h minutes
 const MIN_BLOCK_TIME: u128 = 1_000; // 1 second
 const MAX_MINING_TIME: Duration = Duration::from_secs(300);
 const MAX_FORK_DEPTH: usize = 6;
