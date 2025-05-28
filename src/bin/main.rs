@@ -5,7 +5,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
 use blockchain::auction::auction::{collect_auctions, find_auction_transactions, Auction, AuctionStatus};
-use blockchain::auction::auction_commands::{generate_auction_id, tx_bid, tx_create_auction, tx_end_auction, tx_start_auction};
+use blockchain::auction::auction_commands::{generate_auction_id, tx_bid, tx_create_auction, tx_end_auction, tx_start_auction, AuctionCommand};
 use tonic::transport::Server;
 use blockchain::kademlia::kademlia_proto::kademlia_server::KademliaServer;
 use blockchain::kademlia::node::Node;
@@ -13,6 +13,8 @@ use blockchain::kademlia::service::KademliaService;
 use ed25519_dalek::Keypair;
 use tokio::io::{self as tokio_io, AsyncBufReadExt};
 use tokio::sync::Notify;
+use blockchain::ledger::blockchain::Blockchain;
+use blockchain::ledger::transaction::TransactionType;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -94,6 +96,7 @@ async fn menu(
         println!("8. LIST MY AUCTIONS");
         println!("9. Mine Block");
         println!("10. Show BLOCKCHAIN INFO");
+        println!("11. VIEW AUCTION BIDS");
         println!("99. DEBUG TEST");
         print!("\nOption: ");
         io::stdout().flush().unwrap();
@@ -115,6 +118,7 @@ async fn menu(
             "8" => handle_my_auctions(&node, &keypair, nonce.clone()).await?,
             "9" => handle_mine_block(&node).await?,
             "10" => handle_blockchain_info(&node),
+            "11" => handle_view_auction_bids(&node).await?,
             "99" => handle_debug_test(&node, nonce.clone()).await?,
             _ => println!("Invalid option."),
         }
@@ -238,6 +242,307 @@ async fn handle_debug_test(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct BidInfo {
+    amount: u64,
+    bidder: Vec<u8>,
+    timestamp: u128,
+    tx_hash: Vec<u8>,
+}
+
+// Add this new handler function to your main.rs
+async fn handle_view_auction_bids(
+    node: &Node,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("\n=== AUCTION BIDS VIEWER ===");
+
+    let blockchain = node.get_blockchain();
+    let blockchain_data = {
+        let guard = blockchain.read().unwrap();
+        (*guard).clone()
+    };
+
+    // Get all auction transactions
+    let auction_txs = find_auction_transactions(&blockchain_data);
+    let auctions = collect_auctions(&auction_txs.into_iter().cloned().collect::<Vec<_>>());
+
+    if auctions.is_empty() {
+        println!("No auctions found in the blockchain.");
+        return Ok(());
+    }
+
+    // Extract all bid information from transactions
+    let bid_data = extract_all_bids(&blockchain_data);
+
+    // List all auctions with bid counts
+    println!("Available auctions:");
+    for (id, auction) in &auctions {
+        let status_emoji = match auction.status {
+            AuctionStatus::Pending => "⏳",
+            AuctionStatus::Active => "🟢",
+            AuctionStatus::Ended => "🔴",
+        };
+        let bid_count = bid_data.get(id).map_or(0, |bids| bids.len());
+        println!("{} {} - {} ({} bids)", status_emoji, id, auction.title, bid_count);
+    }
+
+    let auction_id = prompt("Enter auction ID to view all bids: ").await;
+
+    match auctions.get(&auction_id) {
+        Some(auction) => {
+            display_auction_bids(auction, bid_data.get(&auction_id));
+        }
+        None => {
+            println!("Auction ID '{}' not found.", auction_id);
+        }
+    }
+
+    Ok(())
+}
+
+// Extract all bid information from blockchain transactions
+fn extract_all_bids(blockchain: &Blockchain) -> HashMap<String, Vec<BidInfo>> {
+    let mut bid_data: HashMap<String, Vec<BidInfo>> = HashMap::new();
+
+    // Get all auction transactions
+    for block in &blockchain.blocks {
+        for tx in &block.transactions {
+            if tx.data.tx_type != TransactionType::Data {
+                continue;
+            }
+
+            if let Some(data) = &tx.data.data {
+                if data.starts_with("AUCTION_") {
+                    if let Some(stripped) = data.strip_prefix("AUCTION_") {
+                        if let Ok(command) = serde_json::from_str::<AuctionCommand>(stripped) {
+                            if let AuctionCommand::Bid { id, amount } = command {
+                                let bid = BidInfo {
+                                    amount,
+                                    bidder: tx.data.sender.clone(),
+                                    timestamp: tx.data.timestamp,
+                                    tx_hash: tx.tx_hash.clone(),
+                                };
+
+                                bid_data.entry(id).or_insert_with(Vec::new).push(bid);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort bids by timestamp for each auction
+    for bids in bid_data.values_mut() {
+        bids.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    }
+
+    bid_data
+}
+
+// Display detailed auction and bid information
+fn display_auction_bids(auction: &Auction, bids: Option<&Vec<BidInfo>>) {
+    println!("\n🎯 ============ AUCTION DETAILS ============");
+    println!("📋 Title: {}", auction.title);
+    println!("🆔 ID: {}", auction.auction_id);
+    println!("📝 Description: {}", auction.description);
+    println!("👤 Owner: {:02x?}", &auction.owner[..8]);
+    println!("⚡ Status: {:?}", auction.status);
+
+    if let Some(start_time) = auction.start_time {
+        println!("🟢 Started: {}", format_timestamp(start_time));
+    }
+
+    if let Some(end_time) = auction.end_time {
+        println!("🔴 Ended: {}", format_timestamp(end_time));
+    }
+
+    // Current highest bid (from auction structure)
+    if let Some((amount, bidder)) = &auction.highest_bid {
+        println!("🏆 Winning Bid: {} by {:02x?}", amount, &bidder[..8]);
+    } else {
+        println!("🏆 Winning Bid: None");
+    }
+
+    // Display all bids
+    if let Some(all_bids) = bids {
+        if !all_bids.is_empty() {
+            println!("\n📜 ============ ALL BIDS ({}) ============", all_bids.len());
+
+            // Calculate statistics
+            let total_bids = all_bids.len();
+            let unique_bidders = {
+                let mut bidders = std::collections::HashSet::new();
+                for bid in all_bids {
+                    bidders.insert(&bid.bidder);
+                }
+                bidders.len()
+            };
+
+            let amounts: Vec<u64> = all_bids.iter().map(|b| b.amount).collect();
+            let min_bid = *amounts.iter().min().unwrap_or(&0);
+            let max_bid = *amounts.iter().max().unwrap_or(&0);
+            let total_volume: u64 = amounts.iter().sum();
+            let avg_bid = if total_bids > 0 { total_volume / total_bids as u64 } else { 0 };
+
+            println!("📊 Stats: {} bids from {} bidders | Min: {} | Max: {} | Avg: {} | Total Volume: {}",
+                     total_bids, unique_bidders, min_bid, max_bid, avg_bid, total_volume);
+
+            println!("\n⏰ Chronological Order:");
+            for (i, bid) in all_bids.iter().enumerate() {
+                let is_winner = auction.highest_bid
+                    .as_ref()
+                    .map_or(false, |(amount, bidder)| *amount == bid.amount && *bidder == bid.bidder);
+
+                let winner_mark = if is_winner { "🏆" } else { "  " };
+
+                println!("{}{}. {} coins by {:02x?} at {}",
+                         winner_mark,
+                         i + 1,
+                         bid.amount,
+                         &bid.bidder[..8],
+                         format_timestamp(bid.timestamp)
+                );
+            }
+
+            // Sort by amount for ranking
+            let mut sorted_bids = all_bids.clone();
+            sorted_bids.sort_by(|a, b| b.amount.cmp(&a.amount));
+
+            println!("\n🏅 Ranking by Amount:");
+            for (i, bid) in sorted_bids.iter().take(10).enumerate() {
+                let medal = match i {
+                    0 => "🥇",
+                    1 => "🥈",
+                    2 => "🥉",
+                    _ => "🏅",
+                };
+                println!("{}{}. {} coins by {:02x?}",
+                         medal,
+                         i + 1,
+                         bid.amount,
+                         &bid.bidder[..8]
+                );
+            }
+
+            // Bidder activity analysis
+            let mut bidder_stats: HashMap<Vec<u8>, (usize, u64, u64)> = HashMap::new(); // (count, total_spent, highest_bid)
+
+            for bid in all_bids {
+                let entry = bidder_stats.entry(bid.bidder.clone()).or_insert((0, 0, 0));
+                entry.0 += 1;           // increment bid count
+                entry.1 += bid.amount;  // add to total spent
+                entry.2 = entry.2.max(bid.amount); // update highest bid
+            }
+
+            println!("\n👥 Bidder Activity:");
+            let mut sorted_bidders: Vec<_> = bidder_stats.iter().collect();
+            sorted_bidders.sort_by(|a, b| b.1.2.cmp(&a.1.2)); // Sort by highest bid
+
+            for (i, (bidder, (count, total, highest))) in sorted_bidders.iter().enumerate() {
+                println!("{}. {:02x?}: {} bids | Highest: {} | Total: {}",
+                         i + 1,
+                         &bidder[..8],
+                         count,
+                         highest,
+                         total
+                );
+            }
+
+        } else {
+            println!("\n📭 No bids have been placed on this auction yet.");
+        }
+    } else {
+        println!("\n📭 No bid data found for this auction.");
+    }
+
+    println!("\n============================================");
+}
+
+// Simple timestamp formatter
+fn format_timestamp(timestamp: u128) -> String {
+    // Convert milliseconds since epoch to a readable format
+    let seconds = timestamp / 1000;
+    let remaining_ms = timestamp % 1000;
+    format!("{}s.{:03}ms", seconds, remaining_ms)
+}
+
+// Update the existing auction_submenu function to add the bid viewing option
+async fn auction_submenu(
+    node: &Node,
+    auctions: &HashMap<String, Auction>,
+    keypair: &Keypair,
+    nonce: Arc<std::sync::Mutex<u64>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let stdin = tokio_io::BufReader::new(tokio_io::stdin());
+    let mut lines = stdin.lines();
+
+    loop {
+        println!("=== AUCTION ACTIONS ===");
+        println!("0. Back to main menu");
+        println!("B. Place a bid");
+        println!("V. View auction bids"); // <-- Add this option
+        print!("\nOption: ");
+        io::stdout().flush().unwrap();
+
+        let input = match lines.next_line().await? {
+            Some(line) => line.trim().to_uppercase(),
+            None => continue,
+        };
+
+        match input.as_str() {
+            "0" => break,
+            "B" => handle_bid(&node, auctions, keypair, nonce.clone()).await?,
+            "V" => handle_view_bids_from_submenu(node, auctions).await?, // <-- Add this handler
+            _ => println!("Invalid option."),
+        }
+    }
+    Ok(())
+}
+
+// Handler for viewing bids from the auction submenu
+async fn handle_view_bids_from_submenu(
+    node: &Node,
+    auctions: &HashMap<String, Auction>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if auctions.is_empty() {
+        println!("No auctions available to view.");
+        return Ok(());
+    }
+
+    println!("\nAvailable auctions:");
+
+    // Get bid data
+    let blockchain = node.get_blockchain();
+    let blockchain_data = {
+        let guard = blockchain.read().unwrap();
+        (*guard).clone()
+    };
+    let bid_data = extract_all_bids(&blockchain_data);
+
+    for (id, auction) in auctions {
+        let status_emoji = match auction.status {
+            AuctionStatus::Pending => "⏳",
+            AuctionStatus::Active => "🟢",
+            AuctionStatus::Ended => "🔴",
+        };
+        let bid_count = bid_data.get(id).map_or(0, |bids| bids.len());
+        println!("{} {} - {} ({} bids)", status_emoji, id, auction.title, bid_count);
+    }
+
+    let auction_id = prompt("Enter auction ID to view bids: ").await;
+
+    match auctions.get(&auction_id) {
+        Some(auction) => {
+            display_auction_bids(auction, bid_data.get(&auction_id));
+        }
+        None => {
+            println!("Invalid auction ID");
+        }
+    }
+
+    Ok(())
+}
 
 async fn handle_mine_block(node: &Node) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n [NODE {}] STARTING MANUAL MINING...", node.get_address().port());
@@ -526,36 +831,6 @@ async fn handle_list_auctions(
     }
 
     auction_submenu(&node, &auctions, keypair, nonce).await?;
-    Ok(())
-}
-
-async fn auction_submenu(
-    node: &Node,
-    auctions: &HashMap<String, Auction>,
-    keypair: &Keypair,
-    nonce: Arc<std::sync::Mutex<u64>>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let stdin = tokio_io::BufReader::new(tokio_io::stdin());
-    let mut lines = stdin.lines();
-
-    loop {
-        println!("=== AUCTION ACTIONS ===");
-        println!("0. Back to main menu");
-        println!("B. Place a bid");
-        print!("\nOption: ");
-        io::stdout().flush().unwrap();
-
-        let input = match lines.next_line().await? {
-            Some(line) => line.trim().to_uppercase(),
-            None => continue,
-        };
-
-        match input.as_str() {
-            "0" => break,
-            "B" => handle_bid(&node, auctions, keypair, nonce.clone()).await?,
-            _ => println!("Invalid option."),
-        }
-    }
     Ok(())
 }
 
