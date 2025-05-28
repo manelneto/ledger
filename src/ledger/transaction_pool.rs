@@ -1,10 +1,7 @@
 use crate::ledger::transaction::{NonceTracker, PublicKey, Transaction, TransactionType, TxHash};
 use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
-
-const MAX_POOL_SIZE: usize = 10000;
-const MAX_TXS_PER_SENDER: usize = 50;
-const MIN_FEE_RATE: u64 = 0;
+use crate::constants::{MAX_POOL_SIZE, MAX_TXS_PER_SENDER, MIN_FEE_RATE};
 
 #[derive(Clone)]
 pub struct PoolTransaction {

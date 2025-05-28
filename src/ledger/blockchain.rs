@@ -1,18 +1,13 @@
 use super::*;
 use std::vec;
 use std::collections::{HashMap, HashSet};
+use crate::constants::{DIFFICULTY_PREFIX, MAX_BLOCK_TIME, MAX_FORK_DEPTH, MAX_MINING_TIME, MIN_BLOCK_TIME};
 use crate::ledger::block::Block;
 use crate::ledger::lib::{now, BHash};
 use crate::ledger::transaction::{Transaction, PublicKey, TransactionType};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use crate::ledger::merkle_tree::{MerkleTree, MerkleProof};
 use serde::{Serialize, Deserialize};
-
-const DIFFICULTY_PREFIX: &str = "0000";
-const MAX_BLOCK_TIME: u128 = 600_000;
-const MIN_BLOCK_TIME: u128 = 1_000;
-const MAX_MINING_TIME: Duration = Duration::from_secs(300);
-const MAX_FORK_DEPTH: usize = 6;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Blockchain {

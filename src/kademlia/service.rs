@@ -1,12 +1,10 @@
 use std::sync::Arc;
 use tokio::sync::Notify;
-use crate::kademlia::constants::{ID_LENGTH, K, KEY_LENGTH};
+use crate::constants::{DIFFICULTY, ID_LENGTH, K, KEY_LENGTH};
 use crate::kademlia::kademlia_proto::kademlia_server::Kademlia;
 use crate::kademlia::kademlia_proto::{Node as ProtoNode, PingRequest, PingResponse, StoreRequest, StoreResponse, FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse, JoinRequest, JoinResponse, ShutdownRequest, ShutdownResponse};
 use crate::kademlia::node::{Node, BlockchainMessage};
 use tonic::{Request, Response, Status};
-
-static DIFFICULTY_POW: usize = 2;
 
 pub struct KademliaService {
     node: Node,
@@ -159,7 +157,7 @@ impl Kademlia for KademliaService {
             None => return Err(Status::invalid_argument("invalid sender")),
         };
 
-        if !self.node.verify_pow(sender.get_id(), &nonce, &pow_hash, DIFFICULTY_POW) {
+        if !self.node.verify_pow(sender.get_id(), &nonce, &pow_hash, DIFFICULTY) {
             return Err(Status::permission_denied("invalid Proof-of-Work"));
         }
 

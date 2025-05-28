@@ -2,7 +2,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type BHash = Vec<u8>;
 
-// Get the current time in seconds since the UNIX epoch
 pub fn now() -> u128 {
     let epoch_duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)

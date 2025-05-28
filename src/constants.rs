@@ -1,0 +1,23 @@
+use std::time::Duration;
+
+pub const ALPHA: usize = 3;
+pub const BLOCK_INTERVAL: Duration = Duration::from_secs(30);
+pub const CRYPTO_KEY_LENGTH: usize = 32;
+pub const DIFFICULTY: usize = 2;
+pub const DIFFICULTY_PREFIX: &str = "0000";
+pub const ID_LENGTH: usize = 20;
+pub const K: usize = 20;
+pub const KEY_LENGTH: usize = 20;
+pub const MAX_BLOCK_TIME: u128 = 600_000;
+pub const MAX_FORK_DEPTH: usize = 6;
+pub const MAX_MINING_TIME: Duration = Duration::from_secs(300);
+pub const MAX_NODES_TO_SYNC: usize = 3;
+pub const MAX_POOL_SIZE: usize = 10000;
+pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 10;
+pub const MAX_TXS_PER_SENDER: usize = 50;
+pub const MIN_BLOCK_TIME: u128 = 1_000;
+pub const MIN_FEE_RATE: u64 = 0;
+pub const N_BUCKETS: usize = 160;
+pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
+pub const TIMEOUT: u64 = 500;
+pub const TRIES: usize = 3;

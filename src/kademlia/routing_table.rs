@@ -1,4 +1,4 @@
-use crate::kademlia::constants::{ID_LENGTH, N_BUCKETS};
+use crate::constants::{ID_LENGTH, N_BUCKETS};
 use crate::kademlia::kbucket::KBucket;
 use crate::kademlia::node::Node;
 use std::{array, fmt};

@@ -1,4 +1,3 @@
-pub mod constants;
 pub mod kbucket;
 pub mod node;
 pub mod routing_table;

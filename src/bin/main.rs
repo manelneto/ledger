@@ -13,21 +13,22 @@ use blockchain::kademlia::service::KademliaService;
 use ed25519_dalek::Keypair;
 use tokio::io::{self as tokio_io, AsyncBufReadExt};
 use tokio::sync::Notify;
+use blockchain::constants::DIFFICULTY;
 use blockchain::ledger::blockchain::Blockchain;
 use blockchain::ledger::transaction::TransactionType;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
-    if args.len() != 4 {
-        println!("Usage: cargo run --bin main <SELF PORT> <BOOTSTRAP PORT> <POW DIFFICULTY>");
+    if args.len() != 3 {
+        println!("Usage: cargo run --bin main <SELF PORT> <BOOTSTRAP PORT>");
         return Ok(());
     }
 
     let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let port: u16 = args[1].parse()?;
     let bootstrap_port: u16 = args[2].parse()?;
-    let difficulty: usize = args[3].parse()?;
+    let difficulty: usize = DIFFICULTY;
 
     let address = SocketAddr::new(ip, port);
     let bootstrap_address = SocketAddr::new(ip, bootstrap_port);

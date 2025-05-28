@@ -1,4 +1,4 @@
-use crate::kademlia::constants::K;
+use crate::constants::K;
 use crate::kademlia::node::Node;
 use std::collections::VecDeque;
 use std::fmt;

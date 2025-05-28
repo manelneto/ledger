@@ -1,6 +1,4 @@
-use crate::kademlia::constants::{
-    ALPHA, CRYPTO_KEY_LENGTH, ID_LENGTH, K, KEY_LENGTH, TIMEOUT, TRIES,
-};
+use crate::constants::{ALPHA, BLOCK_INTERVAL, CRYPTO_KEY_LENGTH, ID_LENGTH, K, KEY_LENGTH, MAX_NODES_TO_SYNC, MAX_TRANSACTIONS_PER_BLOCK, SYNC_INTERVAL, TIMEOUT, TRIES};
 use crate::kademlia::kademlia_proto::kademlia_client::KademliaClient;
 use crate::kademlia::kademlia_proto::kademlia_server::KademliaServer;
 use crate::kademlia::kademlia_proto::{
@@ -26,11 +24,6 @@ use std::time::Duration;
 use tokio::time::{interval, timeout};
 use tonic::transport::Server;
 use tonic::{Request, Status};
-
-const BLOCK_INTERVAL: Duration = Duration::from_secs(30);
-const SYNC_INTERVAL: Duration = Duration::from_secs(60);
-const MAX_TRANSACTIONS_PER_BLOCK: usize = 10;
-const MAX_NODES_TO_SYNC: usize = 3;
 
 #[derive(Clone)]
 pub struct Node {
