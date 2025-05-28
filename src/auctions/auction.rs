@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::auction::auction_commands::AuctionCommand;
+use crate::auctions::auction_commands::AuctionCommand;
 use crate::blockchain::{blockchain::Blockchain, transaction::{Transaction, TransactionType}};
 
 #[derive(Debug, Clone, PartialEq)]

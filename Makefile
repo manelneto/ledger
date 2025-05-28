@@ -7,10 +7,10 @@ clean:
 	cargo clean
 
 boostrap:
-	cargo run --bin main -- $(PORT) $(PORT)
+	cargo run -- $(PORT) $(PORT)
 
 run:
-	cargo run --bin main -- $(PORT) $(BOOTSTRAP)
+	cargo run -- $(PORT) $(BOOTSTRAP)
 
 shutdown:
 	cargo run --bin shutdown -- $(PORTS)

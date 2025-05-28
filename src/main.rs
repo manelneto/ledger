@@ -1,5 +1,5 @@
-use ledger::auction::auction::{collect_auctions, find_auction_transactions, Auction, AuctionStatus};
-use ledger::auction::auction_commands::{generate_auction_id, tx_bid, tx_create_auction, tx_end_auction, tx_start_auction, AuctionCommand};
+use ledger::auctions::auction::{collect_auctions, find_auction_transactions, Auction, AuctionStatus};
+use ledger::auctions::auction_commands::{generate_auction_id, tx_bid, tx_create_auction, tx_end_auction, tx_start_auction, AuctionCommand};
 use ledger::constants::DIFFICULTY;
 use ledger::kademlia::kademlia_proto::kademlia_server::KademliaServer;
 use ledger::kademlia::node::Node;
@@ -21,7 +21,7 @@ use tonic::transport::Server;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
-        println!("Usage: cargo run --bin main <SELF PORT> <BOOTSTRAP PORT>");
+        println!("Usage: cargo run <SELF PORT> <BOOTSTRAP PORT>");
         return Ok(());
     }
 
