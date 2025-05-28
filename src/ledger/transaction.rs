@@ -1,11 +1,13 @@
 // src/ledger/transaction.rs
 use super::*;
-use serde::{Serialize, Deserialize};
-use std::fmt::{self, Debug, Formatter};
-use ed25519_dalek::{Keypair, PublicKey as DalekPublicKey, Signature as DalekSignature, Signer, Verifier};
-use rand::rngs::OsRng;
 use crate::ledger::lib::now;
+use ed25519_dalek::{
+    Keypair, PublicKey as DalekPublicKey, Signature as DalekSignature, Signer, Verifier,
+};
+use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::{self, Debug, Formatter};
 
 pub type TxHash = Vec<u8>;
 pub type PublicKey = Vec<u8>;
@@ -51,12 +53,12 @@ impl NonceTracker {
 
     pub fn validate_and_update(&mut self, sender: &PublicKey, tx_nonce: u64) -> bool {
         let current_nonce = self.nonces.get(sender).cloned().unwrap_or(0);
-        
+
         // Nonce must be exactly current_nonce + 1
         if tx_nonce != current_nonce + 1 {
             return false;
         }
-        
+
         self.nonces.insert(sender.clone(), tx_nonce);
         true
     }
@@ -143,7 +145,8 @@ impl Transaction {
 
         // Check timestamp is reasonable
         let current_time = now();
-        if self.data.timestamp > current_time + 3_600_000 { // 1 hour in future
+        if self.data.timestamp > current_time + 3_600_000 {
+            // 1 hour in future
             return false;
         }
 
@@ -181,24 +184,29 @@ impl Transaction {
                     if self.data.receiver.is_none() {
                         return false;
                     }
-                    
+
                     // Check for reasonable maximum transfer amount
-                    if amount > 1_000_000_000_000 { // 1 trillion max
+                    if amount > 1_000_000_000_000 {
+                        // 1 trillion max
                         return false;
                     }
                 } else {
                     return false;
                 }
-            },
+            }
             TransactionType::Data => {
                 // Must have valid data
                 if let Some(ref data) = self.data.data {
-                    if data.is_empty() || data.len() > 4096 { // Increased max size for auction data
+                    if data.is_empty() || data.len() > 4096 {
+                        // Increased max size for auction data
                         return false;
                     }
-                    
+
                     // Validate data content (no control characters)
-                    if data.chars().any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t') {
+                    if data
+                        .chars()
+                        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+                    {
                         return false;
                     }
                 } else {
@@ -206,20 +214,20 @@ impl Transaction {
                 }
             }
         }
-    
-        // Make fees optional - accept zero fee for auction transactions
-        // For auction transactions, we don't require fees
+
+        // Special handling for auction transactions - they can have zero fees
         if let Some(ref data) = self.data.data {
             if data.starts_with("AUCTION_") {
-                return true;
+                return true; // Skip fee validation for auction transactions
             }
         }
-        
+
         // For non-auction transactions, validate fee
-        if self.data.fee > 1_000_000 { // Max fee of 1M
+        if self.data.fee > 1_000_000 {
+            // Max fee of 1M
             return false;
         }
-    
+
         true
     }
 
@@ -282,7 +290,8 @@ impl Transaction {
         }
 
         // Sanitize data
-        let sanitized_data = data.chars()
+        let sanitized_data = data
+            .chars()
             .filter(|c| !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t')
             .collect::<String>();
 
@@ -311,7 +320,7 @@ impl Transaction {
                 return true; // Auction transactions don't require balance
             }
         }
-        
+
         match self.data.tx_type {
             TransactionType::Transfer => {
                 if let Some(amount) = self.data.amount {
@@ -319,7 +328,7 @@ impl Transaction {
                     let total_needed = amount + self.data.fee;
                     return *sender_balance >= total_needed;
                 }
-            },
+            }
             TransactionType::Data => {
                 let sender_balance = balances.get(&self.data.sender).unwrap_or(&0);
                 return *sender_balance >= self.data.fee;

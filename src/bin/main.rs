@@ -414,21 +414,58 @@ async fn handle_create_auction(
     let title = prompt("Auction Title: ").await;
     let description = prompt("Auction Description: ").await;
 
-    let mut nonce_lock = nonce.lock().unwrap();
-    match tx_create_auction(keypair, title.clone(), description.clone(), *nonce_lock) {
+    // Calculate the correct nonce by considering both blockchain state AND pending transactions
+    let correct_nonce = {
+        let blockchain = node.get_blockchain();
+        let blockchain_guard = blockchain.read().unwrap();
+        let blockchain_nonce = blockchain_guard.get_next_nonce(&keypair.public.to_bytes().to_vec());
+        drop(blockchain_guard);
+        
+        // Check how many pending transactions we have from this sender
+        let pool = node.get_transaction_pool();
+        let pool_guard = pool.lock().unwrap();
+        let sender_key = keypair.public.to_bytes().to_vec();
+        let pending_txs = pool_guard.get_pending_by_sender(&sender_key);
+        let pending_count = pending_txs.len() as u64;
+        drop(pool_guard);
+        
+        // The correct nonce is blockchain nonce + number of pending transactions
+        let calculated_nonce = blockchain_nonce + pending_count;
+        
+        println!("DEBUG: Blockchain nonce: {}, Pending txs: {}, Using nonce: {}", 
+                 blockchain_nonce, pending_count, calculated_nonce);
+        
+        calculated_nonce
+    };
+    
+    match tx_create_auction(keypair, title.clone(), description.clone(), correct_nonce) {
         Ok(transaction) => {
-            let auction_id = generate_auction_id(&keypair.public.to_bytes(), &title, &description, *nonce_lock);
-            let tx_pool = node.get_transaction_pool();
-            let mut tx_pool_guard = tx_pool.lock().unwrap();
-            match tx_pool_guard.add_transaction(transaction) {
+            println!("DEBUG: Transaction created successfully");
+            println!("  Hash: {}", hex::encode(&transaction.tx_hash[..8]));
+            println!("  Valid: {}", transaction.verify());
+            println!("  Nonce: {}", transaction.data.nonce);
+            println!("  Fee: {}", transaction.data.fee);
+            
+            let auction_id = generate_auction_id(&keypair.public.to_bytes(), &title, &description, correct_nonce);
+            
+            // Use the node's submit_transaction method
+            match node.submit_transaction(transaction).await {
                 Ok(_) => {
                     println!("Auction created successfully!");
                     println!("Auction ID: {}", auction_id);
                     println!("Title: {}", title);
                     println!("Description: {}", description);
-                    *nonce_lock += 1;
+                    
+                    // Update our local nonce counter to the next expected value
+                    let mut nonce_lock = nonce.lock().unwrap();
+                    *nonce_lock = correct_nonce + 1;
+                    
+                    // Verify it's in the pool
+                    let pool = node.get_transaction_pool();
+                    let pool_guard = pool.lock().unwrap();
+                    println!("DEBUG: Pool now has {} transactions", pool_guard.size());
                 }
-                Err(e) => println!("Failed to add auction to transaction pool: {}", e),
+                Err(e) => println!("Failed to submit auction transaction: {}", e),
             }
         }
         Err(e) => println!("Failed to create auction transaction: {}", e),
@@ -563,28 +600,30 @@ async fn handle_bid(
                 }
             }
 
-            let mut nonce_lock = nonce.lock().unwrap();
-            match tx_bid(keypair, auction_id.clone(), bid_amount, *nonce_lock){
+            let correct_nonce = calculate_next_nonce(node, keypair);
+            
+            match tx_bid(keypair, auction_id.clone(), bid_amount, correct_nonce) {
                 Ok(transaction) => {
-                    let tx_pool = node.get_transaction_pool();
-                    let mut tx_pool_guard = tx_pool.lock().unwrap();
-                    match tx_pool_guard.add_transaction(transaction) {
+                    match node.submit_transaction(transaction).await {
                         Ok(_) => {
                             println!("Bid placed successfully!");
                             println!("Auction ID: {}", auction_id);
                             println!("Amount: {}", bid_amount);
-                            *nonce_lock += 1;
+                            
+                            let mut nonce_lock = nonce.lock().unwrap();
+                            *nonce_lock = correct_nonce + 1;
                         }
-                        Err(e) => println!("Failed to add auction to transaction pool: {}", e),
+                        Err(e) => println!("Failed to submit bid transaction: {}", e),
                     }
                 }
-                Err(e) => println!("Failed to create auction transaction: {}", e),
+                Err(e) => println!("Failed to create bid transaction: {}", e),
             }            
         }
         None => println!("Invalid auction ID"),
     }
     Ok(())
 }
+
 
 async fn handle_my_auctions(
     node: &Node,
@@ -701,21 +740,22 @@ async fn handle_start_auction(
             println!("\nStarting auction: {}", auction.title);
             println!("Auction ID: {}", auction_id);
 
-            let mut nonce_lock = nonce.lock().unwrap();
-            match tx_start_auction(keypair, auction_id.clone(), *nonce_lock){
+            let correct_nonce = calculate_next_nonce(node, keypair);
+            
+            match tx_start_auction(keypair, auction_id.clone(), correct_nonce) {
                 Ok(transaction) => {
-                    let tx_pool = node.get_transaction_pool();
-                    let mut tx_pool_guard = tx_pool.lock().unwrap();
-                    match tx_pool_guard.add_transaction(transaction) {
+                    match node.submit_transaction(transaction).await {
                         Ok(_) => {
                             println!("Auction started successfully!");
                             println!("Auction ID: {}", auction_id);
-                            *nonce_lock += 1;
+                            
+                            let mut nonce_lock = nonce.lock().unwrap();
+                            *nonce_lock = correct_nonce + 1;
                         }
-                        Err(e) => println!("Failed to add auction to transaction pool: {}", e),
+                        Err(e) => println!("Failed to submit start auction transaction: {}", e),
                     }
                 }
-                Err(e) => println!("Failed to create auction transaction: {}", e),
+                Err(e) => println!("Failed to create start auction transaction: {}", e),
             }
         }
         None => {
@@ -769,21 +809,22 @@ async fn handle_end_auction(
 
             let confirm = prompt("Are you sure you want to end this auction? (y/N): ").await;
             if confirm.to_lowercase() == "y" || confirm.to_lowercase() == "yes" {
-                let mut nonce_lock = nonce.lock().unwrap();
-                match tx_end_auction(keypair, auction_id.clone(), *nonce_lock){
+                let correct_nonce = calculate_next_nonce(node, keypair);
+                
+                match tx_end_auction(keypair, auction_id.clone(), correct_nonce) {
                     Ok(transaction) => {
-                        let tx_pool = node.get_transaction_pool();
-                        let mut tx_pool_guard = tx_pool.lock().unwrap();
-                        match tx_pool_guard.add_transaction(transaction) {
+                        match node.submit_transaction(transaction).await {
                             Ok(_) => {
-                                println!("Auction started successfully!");
+                                println!("Auction ended successfully!");
                                 println!("Auction ID: {}", auction_id);
-                                *nonce_lock += 1;
+                                
+                                let mut nonce_lock = nonce.lock().unwrap();
+                                *nonce_lock = correct_nonce + 1;
                             }
-                            Err(e) => println!("Failed to add auction to transaction pool: {}", e),
+                            Err(e) => println!("Failed to submit end auction transaction: {}", e),
                         }
                     }
-                    Err(e) => println!("Failed to create auction transaction: {}", e),
+                    Err(e) => println!("Failed to create end auction transaction: {}", e),
                 }
             }
         }
@@ -821,4 +862,27 @@ async fn prompt_parse<T: FromStr>(msg: &str) -> T {
             Err(_) => println!("Invalid input. Please try again."),
         }
     }
+}
+
+fn calculate_next_nonce(node: &Node, keypair: &Keypair) -> u64 {
+    let blockchain = node.get_blockchain();
+    let blockchain_guard = blockchain.read().unwrap();
+    let blockchain_nonce = blockchain_guard.get_next_nonce(&keypair.public.to_bytes().to_vec());
+    drop(blockchain_guard);
+    
+    // Check how many pending transactions we have from this sender
+    let pool = node.get_transaction_pool();
+    let pool_guard = pool.lock().unwrap();
+    let sender_key = keypair.public.to_bytes().to_vec();
+    let pending_txs = pool_guard.get_pending_by_sender(&sender_key);
+    let pending_count = pending_txs.len() as u64;
+    drop(pool_guard);
+    
+    // The correct nonce is blockchain nonce + number of pending transactions
+    let calculated_nonce = blockchain_nonce + pending_count;
+    
+    println!("DEBUG: Blockchain nonce: {}, Pending txs: {}, Using nonce: {}", 
+             blockchain_nonce, pending_count, calculated_nonce);
+    
+    calculated_nonce
 }
