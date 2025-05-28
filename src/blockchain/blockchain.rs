@@ -1,9 +1,9 @@
 use super::*;
-use crate::constants::{DIFFICULTY_PREFIX, MAX_BLOCK_TIME, MAX_FORK_DEPTH, MAX_MINING_TIME, MIN_BLOCK_TIME};
 use crate::blockchain::block::Block;
 use crate::blockchain::lib::{now, BHash};
 use crate::blockchain::merkle_tree::{MerkleProof, MerkleTree};
 use crate::blockchain::transaction::{PublicKey, Transaction, TransactionType};
+use crate::constants::{DIFFICULTY_PREFIX, MAX_BLOCK_TIME, MAX_FORK_DEPTH, MAX_MINING_TIME, MIN_BLOCK_TIME};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -386,7 +386,7 @@ impl Blockchain {
 }
 
 pub struct LightClient {
-    headers: Vec<crate::blockchain::block::BlockHeader>,
+    headers: Vec<block::BlockHeader>,
 }
 
 impl LightClient {
@@ -396,7 +396,7 @@ impl LightClient {
         }
     }
 
-    pub fn add_header(&mut self, header: crate::blockchain::block::BlockHeader) -> Result<(), &'static str> {
+    pub fn add_header(&mut self, header: block::BlockHeader) -> Result<(), &'static str> {
         if let Some(last_header) = self.headers.last() {
             if header.prev_hash != last_header.hash {
                 return Err("Invalid header chain");

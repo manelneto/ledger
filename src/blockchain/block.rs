@@ -51,7 +51,7 @@ impl Block {
     pub fn genesis() -> Self {
         Block {
             index: 0,
-            timestamp: crate::blockchain::lib::now(),
+            timestamp: lib::now(),
             hash: vec![0; 32],
             prev_hash: vec![0; 32],
             nonce: 0,
@@ -65,11 +65,11 @@ impl Block {
         self.transactions.iter().find(|tx| tx.tx_hash == tx_hash)
     }
 
-    pub fn verify_transaction_inclusion(&self, tx_hash: &[u8], proof: &crate::blockchain::merkle_tree::MerkleProof) -> bool {
+    pub fn verify_transaction_inclusion(&self, tx_hash: &[u8], proof: &merkle_tree::MerkleProof) -> bool {
         MerkleTree::verify_proof(&self.merkle_root, tx_hash, proof)
     }
 
-    pub fn generate_inclusion_proof(&self, tx_hash: &[u8]) -> Option<crate::blockchain::merkle_tree::MerkleProof> {
+    pub fn generate_inclusion_proof(&self, tx_hash: &[u8]) -> Option<merkle_tree::MerkleProof> {
         let merkle_tree = MerkleTree::new(&self.transactions);
         merkle_tree.generate_proof(tx_hash)
     }

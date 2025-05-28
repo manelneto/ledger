@@ -1,12 +1,12 @@
+use ed25519_dalek::Keypair;
 use ledger::auctions::auction::{collect_auctions, find_auction_transactions, Auction, AuctionStatus};
 use ledger::auctions::auction_commands::{generate_auction_id, tx_bid, tx_create_auction, tx_end_auction, tx_start_auction, AuctionCommand};
+use ledger::blockchain::blockchain::Blockchain;
+use ledger::blockchain::transaction::TransactionType;
 use ledger::constants::DIFFICULTY;
 use ledger::kademlia::kademlia_proto::kademlia_server::KademliaServer;
 use ledger::kademlia::node::Node;
 use ledger::kademlia::service::KademliaService;
-use ledger::blockchain::blockchain::Blockchain;
-use ledger::blockchain::transaction::TransactionType;
-use ed25519_dalek::Keypair;
 use std::collections::HashMap;
 use std::env;
 use std::io::{self, Write};
@@ -88,9 +88,9 @@ async fn menu(
         println!("6. CREATE AUCTION");
         println!("7. LIST AUCTIONS");
         println!("8. LIST MY AUCTIONS");
-        println!("9. MINE BLOCK");
-        println!("10. BLOCKCHAIN INFO");
-        println!("11. VIEW AUCTION BIDS");
+        println!("9. LIST BIDS");
+        println!("10. MINE BLOCK");
+        println!("11. BLOCKCHAIN INFO");
         print!("\nOption: ");
         io::stdout().flush().unwrap();
 
@@ -108,10 +108,10 @@ async fn menu(
             "5" => handle_whoami(&node, &keypair),
             "6" => handle_create_auction(&node, &keypair, nonce.clone()).await?,
             "7" => handle_list_auctions(&node, &keypair, nonce.clone()).await?,
-            "8" => handle_my_auctions(&node, &keypair, nonce.clone()).await?,
-            "9" => handle_mine_block(&node).await?,
-            "10" => handle_blockchain_info(&node),
-            "11" => handle_view_auction_bids(&node).await?,
+            "8" => handle_list_my_auctions(&node, &keypair, nonce.clone()).await?,
+            "9" => handle_list_bids(&node).await?,
+            "10" => handle_mine_block(&node).await?,
+            "11" => handle_blockchain_info(&node),
             _ => println!("Invalid option."),
         }
     }
@@ -125,7 +125,7 @@ struct BidInfo {
     tx_hash: Vec<u8>,
 }
 
-async fn handle_view_auction_bids(
+async fn handle_list_bids(
     node: &Node,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== AUCTION BIDS VIEWER ===");
@@ -729,7 +729,7 @@ async fn handle_bid(
     Ok(())
 }
 
-async fn handle_my_auctions(
+async fn handle_list_my_auctions(
     node: &Node,
     keypair: &Keypair,
     nonce: Arc<std::sync::Mutex<u64>>,

@@ -1,3 +1,7 @@
+use crate::blockchain::block::Block;
+use crate::blockchain::blockchain::Blockchain;
+use crate::blockchain::transaction::{Transaction, TransactionType};
+use crate::blockchain::transaction_pool::TransactionPool;
 use crate::constants::{ALPHA, BLOCK_INTERVAL, CRYPTO_KEY_LENGTH, ID_LENGTH, K, KEY_LENGTH, MAX_NODES_TO_SYNC, MAX_TRANSACTIONS_PER_BLOCK, SYNC_INTERVAL, TIMEOUT, TRIES};
 use crate::kademlia::kademlia_proto::kademlia_client::KademliaClient;
 use crate::kademlia::kademlia_proto::kademlia_server::KademliaServer;
@@ -6,10 +10,6 @@ use crate::kademlia::kademlia_proto::{
 };
 use crate::kademlia::routing_table::RoutingTable;
 use crate::kademlia::service::KademliaService;
-use crate::blockchain::block::Block;
-use crate::blockchain::blockchain::Blockchain;
-use crate::blockchain::transaction::{Transaction, TransactionType};
-use crate::blockchain::transaction_pool::TransactionPool;
 use ed25519_dalek::{Keypair, PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use futures::stream::{FuturesUnordered, StreamExt};
 use rand::rngs::OsRng;
@@ -70,8 +70,8 @@ impl Node {
             .expect("SHA-256 hash length must be 160 bits (20 bytes)");
 
         Self {
-            public_key: public_key,
-            private_key: private_key,
+            public_key,
+            private_key,
             id,
             address,
             routing_table: Arc::new(RwLock::new(RoutingTable::new(id))),
@@ -86,8 +86,8 @@ impl Node {
         let (public_key, private_key) = Self::get_or_create_keypair(address);
 
         Self {
-            public_key: public_key,
-            private_key: private_key,
+            public_key,
+            private_key,
             id,
             address,
             routing_table: Arc::new(RwLock::new(RoutingTable::new(id))),

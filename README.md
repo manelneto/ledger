@@ -29,7 +29,7 @@ make
 ### Nó *Bootstrap*
 
 ```
-make bootstrap <PORTO>
+make bootstrap <PORT>
 ```
 
 Por exemplo:
@@ -41,19 +41,19 @@ make bootstrap 5000
 ### Nó
 
 ```
-make run <PORTO> <PORTO BOOTSTRAP>
+make run <SELF PORT> <BOOTSTRAP PORT>
 ```
 
 Por exemplo:
 
 ```
-make peer 5001 5000
+make run 5001 5000
 ```
 
 ### Injeção de Falhas
 
 ```
-make shutdown <PORTO_1> <...> <PORTO_N>
+make shutdown <PORT_1> <...> <PORT_N>
 ```
 
 Por exemplo:
@@ -76,13 +76,12 @@ make shutdown 5001 5002
 |___src
     |___constants.rs
     |___lib.rs
+    |___main.rs
     |___auctions
         |___mod.rs
         |___auction.rs
         |___auction_commands.rs
     |___bin
-        |___bootstrap.rs
-        |___peer.rs
         |___shutdown.rs
     |___kademlia
         |___mod.rs
@@ -90,7 +89,7 @@ make shutdown 5001 5002
         |___node.rs
         |___routing_table.rs
         |___service.rs
-    |___ledger
+    |___blockchain
         |___mod.rs
         |___block.rs
         |___blockchain.rs
