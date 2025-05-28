@@ -491,16 +491,18 @@ impl Node {
     }
 
     async fn receive_new_block(&self, block: Block) -> Result<(), &'static str> {
+        println!("Received block {}", block.index);
+        
         let mut blockchain = self.blockchain.write().unwrap();
-
         match blockchain.receive_block(block.clone()) {
             Ok(_) => {
                 let mut pool = self.transaction_pool.lock().unwrap();
                 pool.process_block(&block.transactions);
-
+                println!("Successfully added block {} to blockchain", block.index);
                 Ok(())
             }
             Err(e) => {
+                println!("Failed to add block {} to blockchain", e);
                 Err(e)
             }
         }

@@ -1,4 +1,4 @@
+keys
 target
 .idea
 *.iml
-src/bin/keys/*
