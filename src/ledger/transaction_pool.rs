@@ -176,6 +176,9 @@ impl TransactionPool {
                 tx.data.nonce, expected_nonce, base_nonce
             );
 
+            selected.push(tx.clone());
+            sender_nonces.insert(sender.clone(), tx.data.nonce);
+            /*
             // For auction transactions with nonce 1, we might need to be more lenient
             // Check if this is the first transaction from this sender
             if tx.data.nonce == expected_nonce || (base_nonce == 0 && tx.data.nonce == 1) {
@@ -195,7 +198,7 @@ impl TransactionPool {
                     "DEBUG: Skipped transaction - nonce mismatch. Got {}, expected {}",
                     tx.data.nonce, expected_nonce
                 );
-            }
+            } */
         }
 
         selected
