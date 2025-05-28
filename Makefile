@@ -6,7 +6,7 @@ build:
 clean:
 	cargo clean
 
-boostrap:
+bootstrap:
 	cargo run -- $(PORT) $(PORT)
 
 run:
