@@ -29,37 +29,37 @@ make
 ### Nó *Bootstrap*
 
 ```
-make bootstrap <PORT>
+make bootstrap PORT=<PORT>
 ```
 
 Por exemplo:
 
 ```
-make bootstrap 5000
+make bootstrap PORT=5000
 ```
 
 ### Nó
 
 ```
-make run <SELF PORT> <BOOTSTRAP PORT>
+make run PORT=<SELF PORT> BOOTSTRAP=<BOOTSTRAP PORT>
 ```
 
 Por exemplo:
 
 ```
-make run 5001 5000
+make run PORT=5001 BOOTSTRAP=5000
 ```
 
 ### Injeção de Falhas
 
 ```
-make shutdown <PORT_1> <...> <PORT_N>
+make shutdown PORTS="<PORT_1> <...> <PORT_N>"
 ```
 
 Por exemplo:
 
 ```
-make shutdown 5001 5002
+make shutdown PORTS="5001 5002"
 ```
 
 ## Estrutura
