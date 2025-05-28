@@ -38,6 +38,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let keypair = node.clone().get_keypair()?;
     let nonce = Arc::new(std::sync::Mutex::new(0u64));
 
+    if bootstrap_address == address{
+    println!("[BOOTSTRAP] Listening on {}", address);
+    }
+/* 
+    let service = KademliaService::new(node);
+    Server::builder()
+        .add_service(KademliaServer::new(service))
+        .serve(address)
+        .await?;
+    }
+    else{ */
     let server = Server::builder()
         .add_service(KademliaServer::new(service))
         .serve_with_shutdown(address, async move {
