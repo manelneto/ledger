@@ -1,4 +1,4 @@
 pub mod auction;
 pub mod constants;
 pub mod kademlia;
-pub mod ledger;
+pub mod blockchain;

@@ -6,10 +6,10 @@ use crate::kademlia::kademlia_proto::{
 };
 use crate::kademlia::routing_table::RoutingTable;
 use crate::kademlia::service::KademliaService;
-use crate::ledger::block::Block;
-use crate::ledger::blockchain::Blockchain;
-use crate::ledger::transaction::{Transaction, TransactionType};
-use crate::ledger::transaction_pool::TransactionPool;
+use crate::blockchain::block::Block;
+use crate::blockchain::blockchain::Blockchain;
+use crate::blockchain::transaction::{Transaction, TransactionType};
+use crate::blockchain::transaction_pool::TransactionPool;
 use ed25519_dalek::{Keypair, PublicKey as DalekPublicKey, SecretKey as DalekSecretKey};
 use futures::stream::{FuturesUnordered, StreamExt};
 use rand::rngs::OsRng;
@@ -193,16 +193,16 @@ impl Node {
             TransactionType::Data => 500,
         };
 
-        let tx_data = crate::ledger::transaction::TransactionData {
+        let tx_data = crate::blockchain::transaction::TransactionData {
             sender: sender.clone(),
             receiver,
-            timestamp: crate::ledger::lib::now(),
+            timestamp: crate::blockchain::lib::now(),
             tx_type,
             amount,
             data,
             nonce,
             fee,
-            valid_until: Some(crate::ledger::lib::now() + 3_600_000),
+            valid_until: Some(crate::blockchain::lib::now() + 3_600_000),
         };
 
         let keypair = self.get_keypair()?;
@@ -365,7 +365,7 @@ impl Node {
             hasher.update(b"blockchain_request_v2");
             hasher.update(&self.id);
             hasher.update(&node.get_id());
-            hasher.update(&crate::ledger::lib::now().to_be_bytes());
+            hasher.update(&crate::blockchain::lib::now().to_be_bytes());
             hasher.update(&rand::random::<[u8; 8]>());
             let hash = hasher.finalize();
             hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH])

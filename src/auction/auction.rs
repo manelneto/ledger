@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::auction::auction_commands::AuctionCommand;
-use crate::ledger::{blockchain::Blockchain, transaction::{Transaction, TransactionType}};
+use crate::blockchain::{blockchain::Blockchain, transaction::{Transaction, TransactionType}};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuctionStatus {

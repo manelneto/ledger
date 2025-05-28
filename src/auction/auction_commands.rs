@@ -1,4 +1,4 @@
-use crate::ledger::transaction::Transaction;
+use crate::blockchain::transaction::Transaction;
 use ed25519_dalek::Keypair;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

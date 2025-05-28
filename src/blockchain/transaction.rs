@@ -1,5 +1,5 @@
 use super::*;
-use crate::ledger::lib::now;
+use crate::blockchain::lib::now;
 use ed25519_dalek::{
     Keypair, PublicKey as DalekPublicKey, Signature as DalekSignature, Signer, Verifier,
 };

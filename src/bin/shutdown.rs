@@ -13,7 +13,7 @@ async fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
     if args.is_empty() {
-        eprintln!("Usage: kill <port1> <port2> ...");
+        eprintln!("Usage: cargo run --bin shutdown <PORT_1> ... <PORT_N>");
         std::process::exit(1);
     }
 

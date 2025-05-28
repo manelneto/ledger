@@ -1,9 +1,9 @@
 use super::*;
 use crate::constants::{DIFFICULTY_PREFIX, MAX_BLOCK_TIME, MAX_FORK_DEPTH, MAX_MINING_TIME, MIN_BLOCK_TIME};
-use crate::ledger::block::Block;
-use crate::ledger::lib::{now, BHash};
-use crate::ledger::merkle_tree::{MerkleProof, MerkleTree};
-use crate::ledger::transaction::{PublicKey, Transaction, TransactionType};
+use crate::blockchain::block::Block;
+use crate::blockchain::lib::{now, BHash};
+use crate::blockchain::merkle_tree::{MerkleProof, MerkleTree};
+use crate::blockchain::transaction::{PublicKey, Transaction, TransactionType};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -360,11 +360,11 @@ impl Blockchain {
         }
     }
 
-    pub fn get_block_headers(&self) -> Vec<crate::ledger::block::BlockHeader> {
+    pub fn get_block_headers(&self) -> Vec<crate::blockchain::block::BlockHeader> {
         self.blocks.iter().map(|block| block.get_header()).collect()
     }
 
-    pub fn get_block_header(&self, index: usize) -> Option<crate::ledger::block::BlockHeader> {
+    pub fn get_block_header(&self, index: usize) -> Option<crate::blockchain::block::BlockHeader> {
         self.blocks.get(index).map(|block| block.get_header())
     }
 
@@ -386,7 +386,7 @@ impl Blockchain {
 }
 
 pub struct LightClient {
-    headers: Vec<crate::ledger::block::BlockHeader>,
+    headers: Vec<crate::blockchain::block::BlockHeader>,
 }
 
 impl LightClient {
@@ -396,7 +396,7 @@ impl LightClient {
         }
     }
 
-    pub fn add_header(&mut self, header: crate::ledger::block::BlockHeader) -> Result<(), &'static str> {
+    pub fn add_header(&mut self, header: crate::blockchain::block::BlockHeader) -> Result<(), &'static str> {
         if let Some(last_header) = self.headers.last() {
             if header.prev_hash != last_header.hash {
                 return Err("Invalid header chain");

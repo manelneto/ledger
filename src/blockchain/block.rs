@@ -1,7 +1,7 @@
 use super::*;
-use crate::ledger::lib::{u128_to_bytes, u32_to_bytes, u64_to_bytes, BHash};
-use crate::ledger::merkle_tree::MerkleTree;
-use crate::ledger::transaction::Transaction;
+use crate::blockchain::lib::{u128_to_bytes, u32_to_bytes, u64_to_bytes, BHash};
+use crate::blockchain::merkle_tree::MerkleTree;
+use crate::blockchain::transaction::Transaction;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
 use std::vec;
@@ -51,7 +51,7 @@ impl Block {
     pub fn genesis() -> Self {
         Block {
             index: 0,
-            timestamp: crate::ledger::lib::now(),
+            timestamp: crate::blockchain::lib::now(),
             hash: vec![0; 32],
             prev_hash: vec![0; 32],
             nonce: 0,
@@ -65,11 +65,11 @@ impl Block {
         self.transactions.iter().find(|tx| tx.tx_hash == tx_hash)
     }
 
-    pub fn verify_transaction_inclusion(&self, tx_hash: &[u8], proof: &crate::ledger::merkle_tree::MerkleProof) -> bool {
+    pub fn verify_transaction_inclusion(&self, tx_hash: &[u8], proof: &crate::blockchain::merkle_tree::MerkleProof) -> bool {
         MerkleTree::verify_proof(&self.merkle_root, tx_hash, proof)
     }
 
-    pub fn generate_inclusion_proof(&self, tx_hash: &[u8]) -> Option<crate::ledger::merkle_tree::MerkleProof> {
+    pub fn generate_inclusion_proof(&self, tx_hash: &[u8]) -> Option<crate::blockchain::merkle_tree::MerkleProof> {
         let merkle_tree = MerkleTree::new(&self.transactions);
         merkle_tree.generate_proof(tx_hash)
     }

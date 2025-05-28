@@ -1,5 +1,5 @@
 use super::*;
-use crate::ledger::transaction::Transaction;
+use crate::blockchain::transaction::Transaction;
 use sha2::{Digest, Sha256};
 
 pub type MerkleHash = Vec<u8>;
