@@ -179,20 +179,7 @@ impl Node {
             pool.add_transaction(tx.clone())?;
         }
 
-        self.broadcast_transaction(tx).await;
         Ok(())
-    }
-
-    async fn broadcast_transaction(&self, tx: Transaction) {
-        let message = BlockchainMessage::NewTransaction {
-            transaction: tx.clone(),
-        };
-        let data = serde_json::to_vec(&message).unwrap_or_default();
-
-        let key = tx.tx_hash[..KEY_LENGTH]
-            .try_into()
-            .unwrap_or([0; KEY_LENGTH]);
-        self.store(key, data).await.unwrap_or(());
     }
 
     pub async fn mine_block(&self) -> Result<Block, &'static str> {
@@ -616,16 +603,6 @@ impl Node {
                     }
                 }
 
-                BlockchainMessage::NewTransaction { transaction } => {
-                    println!(
-                        "Received new transaction: {}",
-                        hex::encode(&transaction.tx_hash[..8])
-                    );
-                    if let Err(e) = self.receive_new_transaction(transaction).await {
-                        println!("Failed to process new transaction: {}", e);
-                    }
-                }
-
                 _ => {
                     println!("DEBUG: Other blockchain message type");
                 }
@@ -656,27 +633,6 @@ impl Node {
             }
             Err(e) => {
                 println!("Failed to add new block: {}", e);
-                Err(e)
-            }
-        }
-    }
-
-    async fn receive_new_transaction(&self, transaction: Transaction) -> Result<(), &'static str> {
-        if !transaction.verify() {
-            return Err("Invalid transaction signature");
-        }
-
-        let mut pool = self.transaction_pool.lock().unwrap();
-        match pool.add_transaction(transaction.clone()) {
-            Ok(_) => {
-                println!(
-                    "Added new transaction to pool: {}",
-                    hex::encode(&transaction.tx_hash[..8])
-                );
-                Ok(())
-            }
-            Err(e) => {
-                println!("Failed to add transaction to pool: {}", e);
                 Err(e)
             }
         }
