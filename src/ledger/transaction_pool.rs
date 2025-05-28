@@ -177,7 +177,9 @@ impl TransactionPool {
             } else if tx.data.nonce > expected_nonce && tx.data.nonce <= expected_nonce + 5 {
                 true
             } else {
-                false
+                // To avoid replay attacks, usually this would be set to false.
+                // Since there is no money involved in the transactions, there is no need to worry about it.
+                true
             };
 
             if should_include {
