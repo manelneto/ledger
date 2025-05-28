@@ -500,8 +500,10 @@ fn handle_blockchain_info(node: &Node) {
 async fn handle_ping(node: &Node, ip: IpAddr) -> Result<(), Box<dyn std::error::Error>> {
     let port: u16 = prompt_parse("Target Port: ").await;
     let target = Node::new(SocketAddr::new(ip, port));
-    let ok = node.ping(&target).await?;
-    println!("Node {}:{} is alive: {}", ip, port, ok);
+    match node.ping(&target).await {
+        Ok(ok) => println!("Node {}:{} is alive: {}", ip, port, ok),
+        Err(e) => eprintln!("Node {}:{} is not alive: {}", ip, port, e),
+    }
     Ok(())
 }
 
@@ -524,9 +526,15 @@ async fn handle_find_node(node: &Node, ip: IpAddr) -> Result<(), Box<dyn std::er
     let target = Node::new(SocketAddr::new(ip, port));
     match id.try_into() {
         Ok(id_array) => {
-            let nodes = node.find_node(target, id_array).await?;
-            for n in nodes {
-                println!("Found Node: {:02x?} @ {}", n.get_id(), n.get_address());
+            match node.find_node(target, id_array).await {
+                Ok(nodes) => {
+                    for n in nodes {
+                        println!("Found Node: {:02x?} @ {}", n.get_id(), n.get_address());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to find node via {}:{} – {}", ip, port, e);
+                }
             }
         }
         Err(_) => println!("ID must be exactly 40 hex characters (20 bytes)."),
@@ -540,14 +548,20 @@ async fn handle_find_value(node: &Node, ip: IpAddr) -> Result<(), Box<dyn std::e
     let target = Node::new(SocketAddr::new(ip, port));
     match key.try_into() {
         Ok(key_array) => {
-            let (value, nodes) = node.find_value(target, key_array).await?;
-            match value {
-                Some(v) => println!("Found Value: {:?}", String::from_utf8_lossy(&v)),
-                None => {
-                    println!("Value not found. Closest nodes:");
-                    for n in nodes {
-                        println!("  Node: {:02x?} @ {}", n.get_id(), n.get_address());
+            match node.find_value(target, key_array).await {
+                Ok((value, nodes)) => {
+                    match value {
+                        Some(v) => println!("Found Value: {:?}", String::from_utf8_lossy(&v)),
+                        None => {
+                            println!("Value not found. Closest nodes:");
+                            for n in nodes {
+                                println!("  Node: {:02x?} @ {}", n.get_id(), n.get_address());
+                            }
+                        }
                     }
+                }
+                Err(e) => {
+                    eprintln!("Failed to find value from node {}:{} – {}", ip, port, e);
                 }
             }
         }
