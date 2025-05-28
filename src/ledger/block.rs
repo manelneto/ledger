@@ -107,11 +107,7 @@ impl Hashable for Block {
         bytes.extend(&u128_to_bytes(&self.timestamp));
         bytes.extend(&self.prev_hash);
         bytes.extend(&u64_to_bytes(&self.nonce));
-        
-        // Include Merkle root in hash calculation
         bytes.extend(&self.merkle_root);
-        
-        // Optional: include transaction count
         bytes.extend(&u32_to_bytes(&self.tx_count));
 
         bytes

@@ -1,4 +1,3 @@
-
 use super::*;
 use sha2::{Sha256, Digest};
 use crate::ledger::transaction::Transaction;
@@ -20,11 +19,10 @@ pub struct MerkleTree {
 
 #[derive(Clone, Debug)]
 pub struct MerkleProof {
-    pub proof: Vec<(MerkleHash, bool)>, // (hash, is_right)
+    pub proof: Vec<(MerkleHash, bool)>,
 }
 
 impl MerkleTree {
-    // Create a new Merkle tree from transaction hashes
     pub fn new(transactions: &[Transaction]) -> Self {
         if transactions.is_empty() {
             return MerkleTree {
@@ -33,13 +31,11 @@ impl MerkleTree {
             };
         }
 
-        // Get all transaction hashes
         let mut leaves: Vec<MerkleHash> = transactions
             .iter()
             .map(|tx| tx.tx_hash.clone())
             .collect();
 
-        // If odd number of transactions, duplicate the last one
         if leaves.len() % 2 == 1 {
             leaves.push(leaves.last().unwrap().clone());
         }
@@ -57,11 +53,10 @@ impl MerkleTree {
 
         MerkleTree {
             root: Some(root),
-            leaves: leaves[0..transactions.len()].to_vec(), // Keep original number
+            leaves: leaves[0..transactions.len()].to_vec(),
         }
     }
 
-    // Recursively build the Merkle tree
     fn build_tree(mut nodes: Vec<Box<MerkleNode>>) -> Box<MerkleNode> {
         if nodes.len() == 1 {
             return nodes.pop().unwrap();
@@ -69,13 +64,11 @@ impl MerkleTree {
 
         let mut parent_nodes = Vec::new();
 
-        // Process nodes in pairs
         for i in (0..nodes.len()).step_by(2) {
             let left = nodes[i].clone();
             let right = if i + 1 < nodes.len() {
                 nodes[i + 1].clone()
             } else {
-                // If odd number, duplicate the last node
                 nodes[i].clone()
             };
 
@@ -91,7 +84,6 @@ impl MerkleTree {
         Self::build_tree(parent_nodes)
     }
 
-    // Hash two values together
     fn hash_pair(left: &[u8], right: &[u8]) -> MerkleHash {
         let mut hasher = Sha256::new();
         hasher.update(left);
@@ -99,14 +91,11 @@ impl MerkleTree {
         hasher.finalize().to_vec()
     }
 
-    // Get the root hash
     pub fn get_root_hash(&self) -> Option<MerkleHash> {
         self.root.as_ref().map(|root| root.hash.clone())
     }
 
-    // Generate inclusion proof for a transaction
     pub fn generate_proof(&self, tx_hash: &[u8]) -> Option<MerkleProof> {
-        // Find the leaf index
         let leaf_index = self.leaves.iter().position(|leaf| leaf == tx_hash)?;
         
         let mut proof = Vec::new();
@@ -123,7 +112,6 @@ impl MerkleTree {
         Some(MerkleProof { proof })
     }
 
-    // Recursively traverse tree to build proof
     fn traverse_for_proof(
         &self,
         node: &MerkleNode,
@@ -131,15 +119,12 @@ impl MerkleTree {
         index: usize,
         level_size: usize,
     ) {
-        // If we're at a leaf, we're done
         if node.left.is_none() && node.right.is_none() {
             return;
         }
 
-        // Calculate if current node is right child
         let is_right = index % 2 == 1;
 
-        // Add sibling to proof
         if let (Some(left), Some(right)) = (&node.left, &node.right) {
             if is_right {
                 proof.push((left.hash.clone(), false));
@@ -165,7 +150,6 @@ impl MerkleTree {
         }
     }
 
-    // Verify inclusion proof
     pub fn verify_proof(
         root_hash: &[u8],
         tx_hash: &[u8],
@@ -184,7 +168,6 @@ impl MerkleTree {
         current_hash == root_hash
     }
 
-    // Create Merkle tree from transaction hashes (for light clients)
     pub fn from_hashes(hashes: Vec<MerkleHash>) -> Self {
         if hashes.is_empty() {
             return MerkleTree {
@@ -195,7 +178,6 @@ impl MerkleTree {
 
         let mut leaves = hashes.clone();
 
-        // If odd number of hashes, duplicate the last one
         if leaves.len() % 2 == 1 {
             leaves.push(leaves.last().unwrap().clone());
         }
@@ -217,12 +199,10 @@ impl MerkleTree {
         }
     }
 
-    // Get all leaf hashes (transaction hashes)
     pub fn get_leaves(&self) -> &[MerkleHash] {
         &self.leaves
     }
 
-    // Pretty print the tree structure (for debugging)
     pub fn print_tree(&self) {
         if let Some(root) = &self.root {
             self.print_node(root, 0);
@@ -247,7 +227,6 @@ impl MerkleTree {
     }
 }
 
-// Trait implementation for easier use
 impl Hashable for MerkleTree {
     fn bytes(&self) -> Vec<u8> {
         self.get_root_hash().unwrap_or_default()

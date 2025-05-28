@@ -27,7 +27,6 @@ use tokio::time::{interval, timeout};
 use tonic::transport::Server;
 use tonic::{Request, Status};
 
-// Constants for blockchain operations
 const BLOCK_INTERVAL: Duration = Duration::from_secs(30);
 const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_TRANSACTIONS_PER_BLOCK: usize = 10;
@@ -52,7 +51,6 @@ impl fmt::Display for Node {
     }
 }
 
-// Message types for blockchain sync
 #[derive(Serialize, Deserialize, Clone)]
 pub enum BlockchainMessage {
     RequestFullBlockchain,
@@ -112,18 +110,14 @@ impl Node {
         let key_file_path = format!("keys/{}_{}.json", ip_str, address.port());
         
         if let Ok(existing_keys) = Self::load_keypair_from_file(&key_file_path) {
-            println!("Loaded existing keypair for port {} and ip {}", address.port(), address.ip());
             return existing_keys;
         }
         
-        println!("Generating new keypair for port {} and ip {}", address.port(), address.ip());
         let keypair = Keypair::generate(&mut OsRng);
         let public_key = keypair.public.to_bytes();
         let private_key = keypair.secret.to_bytes();
         
-        if let Err(e) = Self::save_keypair_to_file(&key_file_path, &public_key, &private_key) {
-            println!("Warning: Failed to save keypair to file: {}", e);
-        }
+        let _ = Self::save_keypair_to_file(&key_file_path, &public_key, &private_key);
         
         (public_key, private_key)
     }
@@ -139,7 +133,6 @@ impl Node {
         public_key: &[u8; CRYPTO_KEY_LENGTH], 
         private_key: &[u8; CRYPTO_KEY_LENGTH]
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Create directory if it doesn't exist
         if let Some(parent) = Path::new(file_path).parent() {
             fs::create_dir_all(parent)?;
         }
@@ -152,7 +145,6 @@ impl Node {
         let json_data = serde_json::to_string_pretty(&stored_data)?;
         fs::write(file_path, json_data)?;
         
-        println!("Saved keypair to {}", file_path);
         Ok(())
     }
 
@@ -263,52 +255,21 @@ impl Node {
             pool.get_transactions_4_block(MAX_TRANSACTIONS_PER_BLOCK)
         };
 
-        // Debug: Print what transactions we're trying to mine
-        println!(
-            "DEBUG: Retrieved {} transactions from pool for mining",
-            transactions.len()
-        );
-        for (i, tx) in transactions.iter().enumerate() {
-            println!(
-                "  TX {}: {} (valid: {})",
-                i + 1,
-                hex::encode(&tx.tx_hash[..8]),
-                tx.verify()
-            );
-        }
-
         let mut block = {
             let blockchain = self.blockchain.read().unwrap();
             blockchain.create_block(transactions)?
         };
-
-        // Debug: Print what transactions are in the block before mining
-        println!(
-            "DEBUG: Block created with {} transactions",
-            block.transactions.len()
-        );
 
         {
             let blockchain = self.blockchain.read().unwrap();
             blockchain.mine_block(&mut block)?;
         }
 
-        // Debug: Print what transactions are in the block after mining
-        println!(
-            "DEBUG: Block mined with {} transactions",
-            block.transactions.len()
-        );
-        for (i, tx) in block.transactions.iter().enumerate() {
-            println!("  Block TX {}: {}", i + 1, hex::encode(&tx.tx_hash[..8]));
-        }
-
-        // IMPORTANT: Only add the block if mining was successful
         {
             let mut blockchain = self.blockchain.write().unwrap();
             blockchain.add_block(block.clone())?;
         }
 
-        // IMPORTANT: Only remove transactions from pool AFTER the block is successfully added
         {
             let mut pool = self.transaction_pool.lock().unwrap();
             pool.process_block(&block.transactions);
@@ -320,7 +281,6 @@ impl Node {
     }
 
     async fn broadcast_block(&self, block: Block) {
-        println!("Broadcasting new block {} to network", block.index);
         let message = BlockchainMessage::NewBlock {
             block: block.clone(),
         };
@@ -341,40 +301,24 @@ impl Node {
                     .unwrap_or([0; KEY_LENGTH]);
 
                 broadcast_futures.push(async move {
-                    match timeout(
+                    let _ = timeout(
                         Duration::from_secs(5),
                         self.store_at(&node, key, data_clone),
                     )
-                    .await
-                    {
-                        Ok(Ok(_)) => {
-                            println!("Successfully broadcast block to {}", node.get_address())
-                        }
-                        Ok(Err(e)) => {
-                            println!("Failed to broadcast block to {}: {}", node.get_address(), e)
-                        }
-                        Err(_) => println!("Timeout broadcasting block to {}", node.get_address()),
-                    }
+                    .await;
                 });
             }
         }
 
-        let mut completed = 0;
         while let Some(_) = broadcast_futures.next().await {
-            completed += 1;
         }
-
-        println!("Broadcasted block to {} nodes", completed);
     }
 
     pub async fn sync_blockchain(&self) {
-        println!("Starting blockchain sync...");
-
         let current_height = {
             let blockchain = self.blockchain.read().unwrap();
             blockchain.get_block_height()
         };
-        println!("Current blockchain height: {}", current_height);
 
         let nodes = {
             let routing_table = self.routing_table.read().unwrap();
@@ -382,79 +326,41 @@ impl Node {
         };
 
         if nodes.is_empty() {
-            println!("No nodes found for blockchain sync.");
             return;
         }
-
-        println!("Found {} nodes for sync", nodes.len());
 
         let mut sync_futures = FuturesUnordered::new();
 
         for node in nodes.iter().take(MAX_NODES_TO_SYNC) {
             if node.get_id() != self.get_id() {
-                println!("Requesting blockchain from {}", node.get_address());
                 sync_futures.push(self.request_full_blockchain(node.clone()));
             }
         }
 
         let mut best_blockchain: Option<Blockchain> = None;
         let mut best_height = current_height;
-        let mut successful_syncs = 0;
 
         while let Some(result) = sync_futures.next().await {
-            match result {
-                Ok(blockchain) => {
-                    let height = blockchain.get_block_height();
-                    println!("Successfully received blockchain with height: {}", height);
-                    successful_syncs += 1;
+            if let Ok(blockchain) = result {
+                let height = blockchain.get_block_height();
 
-                    // Accept blockchain if it's valid and has more blocks
-                    if blockchain.is_chain_valid(None) {
-                        if height > best_height {
-                            println!("Found better blockchain with height {}", height);
-                            best_height = height;
-                            best_blockchain = Some(blockchain);
-                        } else if height == best_height && best_blockchain.is_none() {
-                            println!(
-                                "Found blockchain with same height {} (better than current {})",
-                                height, current_height
-                            );
-                            best_blockchain = Some(blockchain);
-                        }
-                    } else {
-                        println!("Received invalid blockchain - rejecting");
+                if blockchain.is_chain_valid(None) {
+                    if height > best_height {
+                        best_height = height;
+                        best_blockchain = Some(blockchain);
+                    } else if height == best_height && best_blockchain.is_none() {
+                        best_blockchain = Some(blockchain);
                     }
-                }
-                Err(e) => {
-                    println!("Error syncing from node: {}", e);
                 }
             }
         }
 
-        println!(
-            "Sync completed: {} successful syncs out of {} attempts",
-            successful_syncs, MAX_NODES_TO_SYNC
-        );
-
         if let Some(blockchain) = best_blockchain {
-            println!(
-                "Updating blockchain from height {} to {}",
-                current_height, best_height
-            );
             let mut current_blockchain = self.blockchain.write().unwrap();
             *current_blockchain = blockchain;
 
             let mut pool = self.transaction_pool.lock().unwrap();
-            pool.clear(); // Clear the transaction pool after sync
-
-            println!("Successfully synced blockchain to height {}", best_height);
-        } else if successful_syncs > 0 {
-            println!(
-                "Received {} blockchain(s) but none were better than current",
-                successful_syncs
-            );
-        } else {
-            println!("No valid blockchains received during sync - keeping current blockchain");
+            pool.clear();
         }
     }
 
@@ -462,22 +368,17 @@ impl Node {
         &self,
         node: Node,
     ) -> Result<Blockchain, Box<dyn std::error::Error>> {
-        println!("Requesting full blockchain from {}", node.get_address());
-
-        // Create a unique key that includes both node IDs and timestamp to avoid collisions
         let request_key = {
             let mut hasher = Sha256::new();
-            hasher.update(b"blockchain_request_v2"); // Version to avoid old keys
+            hasher.update(b"blockchain_request_v2");
             hasher.update(&self.id);
             hasher.update(&node.get_id());
             hasher.update(&crate::ledger::lib::now().to_be_bytes());
-            // Add some randomness
             hasher.update(&rand::random::<[u8; 8]>());
             let hash = hasher.finalize();
             hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH])
         };
 
-        // Create response key (where we expect the response)
         let response_key = {
             let mut hasher = Sha256::new();
             hasher.update(b"blockchain_response_v2");
@@ -486,95 +387,47 @@ impl Node {
             hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH])
         };
 
-        println!("DEBUG: Using request key: {:02x?}", &request_key[..8]);
-        println!("DEBUG: Expecting response key: {:02x?}", &response_key[..8]);
-
-        // Store the request with the response key embedded
         let request_with_response_key = format!("REQUEST:{}", hex::encode(&response_key));
         self.store_at(&node, request_key, request_with_response_key.into_bytes())
             .await?;
 
-        // Wait for response to be processed and stored
         tokio::time::sleep(Duration::from_millis(3000)).await;
 
-        // Try to retrieve the response multiple times
-        for attempt in 1..=3 {
-            println!("DEBUG: Attempt {} to retrieve blockchain response", attempt);
-
+        for _ in 1..=3 {
             match self.find_value(node.clone(), response_key).await {
                 Ok((Some(data), _)) => {
-                    println!("DEBUG: Retrieved response data of {} bytes", data.len());
-
-                    // Try to deserialize the response
                     match serde_json::from_slice::<BlockchainMessage>(&data) {
                         Ok(message) => match message {
                             BlockchainMessage::ResponseFullBlockchain { blockchain } => {
-                                println!(
-                                    "Successfully received full blockchain with {} blocks",
-                                    blockchain.get_block_height()
-                                );
                                 return Ok(blockchain);
                             }
-                            other => {
-                                println!(
-                                    "DEBUG: Unexpected message type in response: {:?}",
-                                    std::mem::discriminant(&other)
-                                );
-                            }
+                            _ => {}
                         },
-                        Err(e) => {
-                            println!(
-                                "DEBUG: Failed to deserialize response (attempt {}): {}",
-                                attempt, e
-                            );
-                            if data.len() < 200 {
-                                println!(
-                                    "DEBUG: Response data: {:?}",
-                                    String::from_utf8_lossy(&data)
-                                );
-                            }
-                        }
+                        Err(_) => {}
                     }
                 }
-                Ok((None, _)) => {
-                    println!("DEBUG: No response found (attempt {})", attempt);
-                }
-                Err(e) => {
-                    println!(
-                        "DEBUG: Error retrieving response (attempt {}): {}",
-                        attempt, e
-                    );
-                }
+                _ => {}
             }
 
-            if attempt < 3 {
-                tokio::time::sleep(Duration::from_millis(1000)).await;
-            }
+            tokio::time::sleep(Duration::from_millis(1000)).await;
         }
 
         Err("Failed to receive valid blockchain response after 3 attempts".into())
     }
 
     pub async fn handle_blockchain_message(&self, data: &[u8]) -> Option<Vec<u8>> {
-        // Check if this is a new-style request with response key
         if let Ok(text) = std::str::from_utf8(data) {
             if text.starts_with("REQUEST:") {
-                let response_key_hex = &text[8..]; // Remove "REQUEST:" prefix
+                let response_key_hex = &text[8..];
                 if let Ok(response_key_bytes) = hex::decode(response_key_hex) {
                     if response_key_bytes.len() == KEY_LENGTH {
-                        println!(
-                            "Received new-style blockchain request, response key: {:02x?}",
-                            &response_key_bytes[..8]
-                        );
-
                         let blockchain = self.blockchain.read().unwrap().clone();
 
-                        // Create simplified blockchain to avoid serialization issues
                         let safe_blockchain = Blockchain {
                             blocks: blockchain.blocks.clone(),
                             difficulty: blockchain.difficulty,
-                            forks: HashMap::new(), // Clear forks to avoid serialization issues
-                            balances: HashMap::new(), // Clear balances to avoid key serialization issues
+                            forks: HashMap::new(),
+                            balances: HashMap::new(),
                         };
 
                         let response = BlockchainMessage::ResponseFullBlockchain {
@@ -583,12 +436,6 @@ impl Node {
 
                         match serde_json::to_vec(&response) {
                             Ok(response_data) => {
-                                println!(
-                                    "Prepared blockchain response ({} bytes)",
-                                    response_data.len()
-                                );
-
-                                // Store the response at the specified key
                                 let response_key: [u8; KEY_LENGTH] =
                                     response_key_bytes.try_into().unwrap();
                                 tokio::spawn({
@@ -597,34 +444,21 @@ impl Node {
                                         let storage = node.get_storage();
                                         let mut storage_guard = storage.write().unwrap();
                                         storage_guard.insert(response_key, response_data);
-                                        println!(
-                                            "Stored blockchain response at key: {:02x?}",
-                                            &response_key[..8]
-                                        );
                                     }
                                 });
 
-                                return Some(b"OK".to_vec()); // Acknowledge the request
+                                return Some(b"OK".to_vec());
                             }
-                            Err(e) => {
-                                println!("Failed to serialize blockchain response: {}", e);
-                            }
+                            Err(_) => {}
                         }
                     }
                 }
             }
         }
 
-        // Try to parse as a blockchain message (legacy handling)
         if let Ok(message) = serde_json::from_slice::<BlockchainMessage>(data) {
-            println!(
-                "DEBUG: Handling legacy blockchain message: {:?}",
-                std::mem::discriminant(&message)
-            );
-
             match message {
                 BlockchainMessage::RequestFullBlockchain => {
-                    println!("Received legacy blockchain request - preparing response");
                     let blockchain = self.blockchain.read().unwrap().clone();
 
                     let safe_blockchain = Blockchain {
@@ -640,33 +474,17 @@ impl Node {
 
                     match serde_json::to_vec(&response) {
                         Ok(response_data) => {
-                            println!(
-                                "Legacy blockchain response prepared ({} bytes)",
-                                response_data.len()
-                            );
                             return Some(response_data);
                         }
-                        Err(e) => {
-                            println!("Failed to serialize legacy blockchain response: {}", e);
-                        }
+                        Err(_) => {}
                     }
                 }
 
                 BlockchainMessage::NewBlock { block } => {
-                    println!("Received new block: {}", block.index);
-                    if let Err(e) = self.receive_new_block(block).await {
-                        println!("Failed to process new block: {}", e);
-                    }
+                    let _ = self.receive_new_block(block).await;
                 }
-                _ => {
-                    println!("DEBUG: Other blockchain message type");
-                }
+                _ => {}
             }
-        } else {
-            println!(
-                "DEBUG: Could not parse as blockchain message - {} bytes",
-                data.len()
-            );
         }
 
         None
@@ -675,19 +493,14 @@ impl Node {
     async fn receive_new_block(&self, block: Block) -> Result<(), &'static str> {
         let mut blockchain = self.blockchain.write().unwrap();
 
-        // Validate and add the block
         match blockchain.receive_block(block.clone()) {
             Ok(_) => {
-                println!("Successfully added new block {} to blockchain", block.index);
-
-                // Remove transactions from pool that are now confirmed
                 let mut pool = self.transaction_pool.lock().unwrap();
                 pool.process_block(&block.transactions);
 
                 Ok(())
             }
             Err(e) => {
-                println!("Failed to add new block: {}", e);
                 Err(e)
             }
         }
@@ -701,18 +514,7 @@ impl Node {
                 interval.tick().await;
 
                 if !*node.is_mining.read().unwrap() {
-                    match node.mine_block().await {
-                        Ok(block) => {
-                            println!(
-                                "Mined block {} with hash {}",
-                                block.index,
-                                hex::encode(&block.hash[0..8])
-                            );
-                        }
-                        Err(e) => {
-                            println!("Mining error: {}", e);
-                        }
-                    }
+                    let _ = node.mine_block().await;
                 }
             }
         });
@@ -729,7 +531,6 @@ impl Node {
         });
     }
 
-    // Get blockchain info
     pub fn get_blockchain_info(&self) -> (usize, Option<String>) {
         let blockchain = self.blockchain.read().unwrap();
         let height = blockchain.get_block_height();
@@ -766,11 +567,6 @@ impl Node {
         let mut client =
             KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
 
-        println!(
-            "BOOTSTRAP: sending FIND_NODE request to boostrap node ({})...",
-            bootstrap_node
-        );
-
         let request = Request::new(FindNodeRequest {
             sender: Some(self.to_send()),
             id: self.id.to_vec(),
@@ -778,15 +574,10 @@ impl Node {
 
         let response = client.find_node(request).await?.into_inner();
 
-        println!(
-            "BOOTSTRAP: received FIND_NODE response from boostrap node ({})!",
-            bootstrap_node
-        );
-
         let mut routing_table = self
             .routing_table
             .write()
-            .map_err(|_| Status::internal("BOOTSTRAP: failed to acquire lock on routing table"))?;
+            .map_err(|_| Status::internal("failed to acquire lock on routing table"))?;
 
         for proto in response.nodes {
             if let Some(node) = Node::from_sender(&proto) {
@@ -794,10 +585,7 @@ impl Node {
             }
         }
 
-        println!("BOOTSTRAP: successfully updated routing table.");
-        //println!("{}", routing_table);
         drop(routing_table);
-        println!("BOOTSTRAP: syncing blockchain...");
         self.sync_blockchain().await;
 
         Ok(())
@@ -808,8 +596,6 @@ impl Node {
             KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
         for _ in 0..TRIES {
-            println!("PING: sending PING request to {}...", target);
-
             let request = Request::new(PingRequest {
                 sender: Some(self.to_send()),
             });
@@ -817,12 +603,10 @@ impl Node {
             let result = timeout(Duration::from_millis(TIMEOUT), client.ping(request)).await;
 
             if let Ok(Ok(response)) = result {
-                println!("PING: received PING response from {}!", target);
                 return Ok(response.into_inner().alive);
             }
         }
 
-        println!("PING: did not receive PING response from {}!", target);
         Ok(false)
     }
 
@@ -855,8 +639,6 @@ impl Node {
         let mut client =
             KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
-        println!("STORE: sending STORE request to {}...", target);
-
         let request = Request::new(StoreRequest {
             sender: Some(self.to_send()),
             key: key.to_vec(),
@@ -864,8 +646,6 @@ impl Node {
         });
 
         let response = client.store(request).await?.into_inner();
-
-        println!("STORE: received STORE response from {}!", target);
 
         Ok(response.success)
     }
@@ -878,16 +658,12 @@ impl Node {
         let mut client =
             KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
-        println!("FIND_NODE: sending FIND_NODE request to {}...", target);
-
         let request = Request::new(FindNodeRequest {
             sender: Some(self.to_send()),
             id: id.to_vec(),
         });
 
         let response = client.find_node(request).await?.into_inner();
-
-        println!("FIND_NODE: received FIND_NODE response from {}!", target);
 
         let nodes = response
             .nodes
@@ -906,8 +682,6 @@ impl Node {
         let mut client =
             KademliaClient::connect(format!("http://{}", target.get_address())).await?;
 
-        println!("FIND_VALUE: sending FIND_VALUE request to {}...", target);
-
         let request = Request::new(FindValueRequest {
             sender: Some(self.to_send()),
             key: key.to_vec(),
@@ -922,8 +696,6 @@ impl Node {
             .filter_map(|proto| Node::from_sender(&proto))
             .collect();
 
-        println!("FIND_VALUE: received FIND_VALUE response from {}!", target);
-
         Ok((value, nodes))
     }
 
@@ -933,15 +705,10 @@ impl Node {
         difficulty: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if !self.ping(&bootstrap_node).await? {
-            return Err("JOIN: error pinging boostrap node!".into());
+            return Err("error pinging boostrap node!".into());
         }
 
         let (nonce, pow_hash) = self.generate_pow(difficulty).await;
-
-        println!(
-            "JOIN: sending JOIN request to bootstrap node ({})...",
-            bootstrap_node
-        );
 
         let mut client =
             KademliaClient::connect(format!("http://{}", bootstrap_node.get_address())).await?;
@@ -954,13 +721,8 @@ impl Node {
 
         let response = client.join(request).await?.into_inner();
 
-        println!(
-            "JOIN: received JOIN response from bootstrap node ({})!",
-            bootstrap_node
-        );
-
         if !response.accepted {
-            return Err("JOIN: request rejected by bootstrap node!".into());
+            return Err("request rejected by bootstrap node!".into());
         }
 
         let routing_table_lock = self.routing_table.clone();
@@ -978,26 +740,16 @@ impl Node {
                         Ok(Ok(true)) => match routing_table_lock.write() {
                             Ok(mut routing_table) => {
                                 routing_table.update(node.clone());
-                                println!(
-                                    "JOIN: successfully pinged {}, so updated routing table.",
-                                    node
-                                );
                             }
-                            Err(_) => {
-                                println!("JOIN: failed to acquire lock on routing table.");
-                            }
+                            Err(_) => {}
                         },
-                        _ => println!(
-                            "JOIN: failed to ping {}, so did not update routing table.",
-                            node
-                        ),
+                        _ => {}
                     }
                 }
             });
 
         futures::future::join_all(ping_futures).await;
         self.sync_blockchain().await;
-        println!("JOIN: successfully joined the network.");
         Ok(())
     }
 
@@ -1006,7 +758,7 @@ impl Node {
             let routing_table_lock = self.get_routing_table();
             let routing_table = routing_table_lock
                 .read()
-                .expect("ITERATIVE_FIND_NODE: failed to read routing table");
+                .expect("failed to read routing table");
             routing_table.find_closest_nodes(&target, K)
         };
 
@@ -1052,7 +804,7 @@ impl Node {
             let routing_table_lock = self.get_routing_table();
             let routing_table = routing_table_lock
                 .read()
-                .expect("ITERATIVE_FIND_VALUE: failed to read routing table");
+                .expect("failed to read routing table");
             routing_table.find_closest_nodes(&key, K)
         };
 
@@ -1113,8 +865,6 @@ impl Node {
             .add_service(KademliaServer::new(KademliaService::new(self.clone())))
             .serve(self.address)
             .await?;
-
-        println!("START: started {}!", self);
 
         Ok(())
     }

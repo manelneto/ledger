@@ -5,11 +5,10 @@ use crate::auction::auction_commands::AuctionCommand;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuctionStatus {
-    Pending,  // Created but not started
-    Active,   // Started and accepting bids
-    Ended,    // Manually closed or expired
+    Pending,
+    Active,
+    Ended,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct Auction {
@@ -104,7 +103,6 @@ pub fn collect_auctions(transactions: &[Transaction]) -> HashMap<String, Auction
             AuctionCommand::Bid { id, amount } => {
                     let Some(auction) = auctions.get_mut(&id) else { continue };
 
-
                 if auction.status != AuctionStatus::Active {
                     continue;
                 }
@@ -116,7 +114,7 @@ pub fn collect_auctions(transactions: &[Transaction]) -> HashMap<String, Auction
                 let is_active_period = match (auction.start_time, auction.end_time) {
                     (Some(start), None) => tx.data.timestamp >= start,
                     (Some(start), Some(end)) => tx.data.timestamp >= start && tx.data.timestamp <= end,
-                    _ => false, // Should theoretically never happen since status is Active
+                    _ => false,
                 };
             
                 if !is_active_period {
@@ -138,5 +136,3 @@ pub fn collect_auctions(transactions: &[Transaction]) -> HashMap<String, Auction
 
     auctions
 }
-
-

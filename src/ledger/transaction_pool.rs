@@ -142,108 +142,61 @@ impl TransactionPool {
     }
 
     pub fn get_transactions_for_block(&self, max_size: usize, max_gas: u64) -> Vec<Transaction> {
-    let mut selected = Vec::new();
-    let mut total_size = 0;
-    let mut total_gas = 0;
+        let mut selected = Vec::new();
+        let mut total_size = 0;
+        let mut total_gas = 0;
 
-    let mut pool_txs: Vec<_> = self.transactions.values().collect();
-    pool_txs.sort_by(|a, b| {
-        b.fee_per_byte
-            .cmp(&a.fee_per_byte)
-            .then_with(|| a.transaction.data.nonce.cmp(&b.transaction.data.nonce))
-    });
+        let mut pool_txs: Vec<_> = self.transactions.values().collect();
+        pool_txs.sort_by(|a, b| {
+            b.fee_per_byte
+                .cmp(&a.fee_per_byte)
+                .then_with(|| a.transaction.data.nonce.cmp(&b.transaction.data.nonce))
+        });
 
-    let mut sender_nonces: HashMap<PublicKey, u64> = HashMap::new();
+        let mut sender_nonces: HashMap<PublicKey, u64> = HashMap::new();
 
-    for pool_tx in pool_txs {
-        let tx = &pool_tx.transaction;
-        let tx_size = self.estimate_transaction_size(tx);
-        let tx_gas = self.estimate_gas_cost(tx);
+        for pool_tx in pool_txs {
+            let tx = &pool_tx.transaction;
+            let tx_size = self.estimate_transaction_size(tx);
+            let tx_gas = self.estimate_gas_cost(tx);
 
-        if total_size + tx_size > max_size as u64 || total_gas + tx_gas > max_gas {
-            continue;
-        }
+            if total_size + tx_size > max_size as u64 || total_gas + tx_gas > max_gas {
+                continue;
+            }
 
-        let sender = &tx.data.sender;
-        
-        // Get the expected nonce for this sender
-        let base_nonce = self.nonce_tracker.get_nonce(sender);
-        let current_nonce = sender_nonces.get(sender).unwrap_or(&base_nonce);
-        let expected_nonce = current_nonce + 1;
+            let sender = &tx.data.sender;
 
-        println!(
-            "DEBUG: TX nonce={}, expected={}, base={}",
-            tx.data.nonce, expected_nonce, base_nonce
-        );
+            let base_nonce = self.nonce_tracker.get_nonce(sender);
+            let current_nonce = sender_nonces.get(sender).unwrap_or(&base_nonce);
+            let expected_nonce = current_nonce + 1;
 
-        // IMPROVED NONCE VALIDATION WITH FLEXIBILITY
-        let should_include = if tx.data.nonce == expected_nonce {
-            // Perfect case - sequential nonce
-            true
-        } else if base_nonce == 0 && tx.data.nonce == 1 {
-            // Special case for first transaction from new sender
-            true
-        } else if tx.data.nonce > expected_nonce && tx.data.nonce <= expected_nonce + 5 {
-            // Allow small nonce gaps (up to 5) for network resilience
-            // This helps with leave/rejoin scenarios
-            println!("WARNING: Accepting transaction with small nonce gap");
-            true
-        } else {
-            // Reject transactions with large nonce gaps or old nonces
-            println!(
-                "DEBUG: Skipped transaction - nonce mismatch. Got {}, expected {}",
-                tx.data.nonce, expected_nonce
-            );
-            false
-        };
+            let should_include = if tx.data.nonce == expected_nonce {
+                true
+            } else if base_nonce == 0 && tx.data.nonce == 1 {
+                true
+            } else if tx.data.nonce > expected_nonce && tx.data.nonce <= expected_nonce + 5 {
+                true
+            } else {
+                false
+            };
 
-        if should_include {
-            selected.push(tx.clone());
-            total_size += tx_size;
-            total_gas += tx_gas;
-            sender_nonces.insert(sender.clone(), tx.data.nonce);
-            
-            println!("DEBUG: Selected transaction with nonce {}", tx.data.nonce);
+            if should_include {
+                selected.push(tx.clone());
+                total_size += tx_size;
+                total_gas += tx_gas;
+                sender_nonces.insert(sender.clone(), tx.data.nonce);
 
-            if selected.len() >= 1000 {
-                break;
+                if selected.len() >= 1000 {
+                    break;
+                }
             }
         }
+
+        selected
     }
 
-    selected
-}
-
     pub fn get_transactions_4_block(&self, max_transactions: usize) -> Vec<Transaction> {
-        println!(
-            "DEBUG: Getting transactions for block, pool has {} transactions",
-            self.transactions.len()
-        );
-
-        // Debug: Show all transactions in pool
-        for (hash, pool_tx) in &self.transactions {
-            let tx = &pool_tx.transaction;
-            println!(
-                "  Pool TX: {} (valid: {}, fee: {}, nonce: {})",
-                hex::encode(&hash[..8]),
-                tx.verify(),
-                tx.data.fee,
-                tx.data.nonce
-            );
-        }
-
         let result = self.get_transactions_for_block(max_transactions * 500, 1000000);
-
-        println!("DEBUG: Selected {} transactions for block", result.len());
-        for (i, tx) in result.iter().enumerate() {
-            println!(
-                "  Selected TX {}: {} (valid: {})",
-                i + 1,
-                hex::encode(&tx.tx_hash[..8]),
-                tx.verify()
-            );
-        }
-
         result
     }
 
