@@ -1,4 +1,3 @@
-// src/ledger/transaction.rs
 use super::*;
 use crate::ledger::lib::now;
 use ed25519_dalek::{
@@ -29,7 +28,7 @@ pub struct TransactionData {
     pub data: Option<String>,
     pub nonce: u64,
     pub fee: u64,
-    pub valid_until: Option<u128>, // Transaction expiration time
+    pub valid_until: Option<u128>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -39,7 +38,6 @@ pub struct Transaction {
     pub tx_hash: TxHash,
 }
 
-// Nonce tracker for replay protection
 pub struct NonceTracker {
     nonces: HashMap<PublicKey, u64>,
 }
@@ -54,7 +52,6 @@ impl NonceTracker {
     pub fn validate_and_update(&mut self, sender: &PublicKey, tx_nonce: u64) -> bool {
         let current_nonce = self.nonces.get(sender).cloned().unwrap_or(0);
 
-        // Nonce must be exactly current_nonce + 1
         if tx_nonce != current_nonce + 1 {
             return false;
         }
@@ -92,7 +89,6 @@ impl Hashable for Transaction {
 }
 
 impl Transaction {
-    // Helper method to create transaction data
     pub fn new_data(
         sender: PublicKey,
         receiver: Option<PublicKey>,
@@ -111,17 +107,15 @@ impl Transaction {
             data,
             nonce,
             fee,
-            valid_until: Some(now() + 3_600_000), // 1 hour validity
+            valid_until: Some(now() + 3_600_000),
         }
     }
 
-    // Sign a transaction
     pub fn sign(tx_data: &TransactionData, key_pair: &Keypair) -> Signature {
         let data_bytes = serde_json::to_vec(tx_data).unwrap_or_default();
         key_pair.sign(&data_bytes).to_bytes().to_vec()
     }
 
-    // Create and sign a transaction
     pub fn create_signed(tx_data: TransactionData, key_pair: &Keypair) -> Self {
         let signature = Self::sign(&tx_data, key_pair);
         let mut transaction = Transaction {
@@ -134,33 +128,26 @@ impl Transaction {
         transaction
     }
 
-    // Verify transaction signature and validity
     pub fn verify(&self) -> bool {
-        // Check if transaction has expired
         if let Some(valid_until) = self.data.valid_until {
             if now() > valid_until {
                 return false;
             }
         }
 
-        // Check timestamp is reasonable
         let current_time = now();
         if self.data.timestamp > current_time + 3_600_000 {
-            // 1 hour in future
             return false;
         }
 
-        // Check if timestamp is too old (24 hours)
         if self.data.timestamp < current_time.saturating_sub(86_400_000) {
             return false;
         }
 
-        // Validate transaction-specific rules
         if !self.validate_transaction_specifics() {
             return false;
         }
 
-        // Verify signature
         let data_bytes = serde_json::to_vec(&self.data).unwrap_or_default();
 
         if let Ok(public_key) = DalekPublicKey::from_bytes(&self.data.sender) {
@@ -172,11 +159,9 @@ impl Transaction {
         false
     }
 
-    // Validate transaction-specific rules
     fn validate_transaction_specifics(&self) -> bool {
         match self.data.tx_type {
             TransactionType::Transfer => {
-                // Must have valid amount and receiver
                 if let Some(amount) = self.data.amount {
                     if amount == 0 {
                         return false;
@@ -185,9 +170,7 @@ impl Transaction {
                         return false;
                     }
 
-                    // Check for reasonable maximum transfer amount
                     if amount > 1_000_000_000_000 {
-                        // 1 trillion max
                         return false;
                     }
                 } else {
@@ -195,14 +178,11 @@ impl Transaction {
                 }
             }
             TransactionType::Data => {
-                // Must have valid data
                 if let Some(ref data) = self.data.data {
                     if data.is_empty() || data.len() > 4096 {
-                        // Increased max size for auction data
                         return false;
                     }
 
-                    // Validate data content (no control characters)
                     if data
                         .chars()
                         .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
@@ -215,34 +195,28 @@ impl Transaction {
             }
         }
 
-        // Special handling for auction transactions - they can have zero fees
         if let Some(ref data) = self.data.data {
             if data.starts_with("AUCTION_") {
-                return true; // Skip fee validation for auction transactions
+                return true;
             }
         }
 
-        // For non-auction transactions, validate fee
         if self.data.fee > 1_000_000 {
-            // Max fee of 1M
             return false;
         }
 
         true
     }
 
-    // Generate a keypair
     pub fn generate_keypair() -> Keypair {
         let mut csprng = OsRng;
         Keypair::generate(&mut csprng)
     }
 
-    // Get public key from keypair
     pub fn get_public_key(key_pair: &Keypair) -> Vec<u8> {
         key_pair.public.to_bytes().to_vec()
     }
 
-    // Create a transfer transaction
     pub fn create_transfer(
         key_pair: &Keypair,
         receiver: PublicKey,
@@ -269,7 +243,7 @@ impl Transaction {
             data: None,
             nonce,
             fee,
-            valid_until: Some(now() + 3_600_000), // 1 hour validity
+            valid_until: Some(now() + 3_600_000),
         };
 
         Ok(Self::create_signed(tx_data, key_pair))
@@ -289,7 +263,6 @@ impl Transaction {
             return Err("Data too large (max 1KB)");
         }
 
-        // Sanitize data
         let sanitized_data = data
             .chars()
             .filter(|c| !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t')
@@ -306,18 +279,16 @@ impl Transaction {
             data: Some(sanitized_data),
             nonce,
             fee,
-            valid_until: Some(now() + 3_600_000), // 1 hour validity
+            valid_until: Some(now() + 3_600_000),
         };
 
         Ok(Self::create_signed(tx_data, key_pair))
     }
 
-    // Check if transaction can be applied (for double-spend prevention)
     pub fn can_be_applied(&self, balances: &HashMap<PublicKey, u64>) -> bool {
-        // For auction transactions, don't require balance
         if let Some(ref data) = self.data.data {
             if data.starts_with("AUCTION_") {
-                return true; // Auction transactions don't require balance
+                return true;
             }
         }
 

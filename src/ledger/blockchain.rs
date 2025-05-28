@@ -1,4 +1,3 @@
-// src/ledger/blockchain.rs
 use super::*;
 use std::vec;
 use std::collections::{HashMap, HashSet};
@@ -10,8 +9,8 @@ use crate::ledger::merkle_tree::{MerkleTree, MerkleProof};
 use serde::{Serialize, Deserialize};
 
 const DIFFICULTY_PREFIX: &str = "0000";
-const MAX_BLOCK_TIME: u128 = 3600_000; // 1h minutes
-const MIN_BLOCK_TIME: u128 = 1_000; // 1 second
+const MAX_BLOCK_TIME: u128 = 600_000;
+const MIN_BLOCK_TIME: u128 = 1_000;
 const MAX_MINING_TIME: Duration = Duration::from_secs(300);
 const MAX_FORK_DEPTH: usize = 6;
 
@@ -43,7 +42,6 @@ impl Blockchain {
         self.blocks.push(genesis);
     }
 
-    /// Criar um novo bloco candidato
     pub fn create_block(&self, transactions: Vec<Transaction>) -> Result<Block, &'static str> {
         let last_block = self.get_last_block()
             .ok_or("No blocks in chain")?;
@@ -52,14 +50,13 @@ impl Blockchain {
             last_block.index + 1,
             now(),
             last_block.hash.clone(),
-            0, // nonce inicial
+            0,
             transactions,
         );
         
         Ok(new_block)
     }
 
-    /// Fazer proof of work em um bloco (apenas PoW)
     pub fn mine_block(&self, block: &mut Block) -> Result<(), &'static str> {
         let start_time = Instant::now();
         let target = "0".repeat(self.difficulty);
@@ -84,25 +81,17 @@ impl Blockchain {
         }
     }
 
-    /// Validar e adicionar bloco à cadeia
     pub fn add_block(&mut self, block: Block) -> Result<(), &'static str> {
-        // Validação completa
         self.validate_block(&block)?;
-        
-        // Processar transações
         self.process_block_transactions(&block)?;
-        
-        // Adicionar à cadeia
         self.blocks.push(block);
         Ok(())
     }
 
-    /// Validar bloco completamente
     fn validate_block(&self, block: &Block) -> Result<(), &'static str> {
         let last_block = self.get_last_block()
             .ok_or("No blocks in chain")?;
 
-        // Validar encadeamento
         if block.prev_hash != last_block.hash {
             return Err("Block has invalid previous hash");
         }
@@ -111,7 +100,6 @@ impl Blockchain {
             return Err("Block has invalid index");
         }
 
-        // Validar timestamp
         let time_diff = block.timestamp.saturating_sub(last_block.timestamp);
         if time_diff < MIN_BLOCK_TIME {
             return Err("Block time is too short");
@@ -120,12 +108,10 @@ impl Blockchain {
             return Err("Block time is too long");
         }
 
-        // Validar proof of work
         if !self.is_block_hash_valid(&block.hash) {
             return Err("Block hash doesn't meet difficulty requirements");
         }
 
-        // Validar transações
         self.validate_transactions(block)?;
         
         Ok(())
@@ -285,7 +271,6 @@ impl Blockchain {
             }
         }
 
-        // Fork handling
         for (i, existing_block) in self.blocks.iter().enumerate() {
             if block.prev_hash == existing_block.hash {
                 if (self.blocks.len() - i) > MAX_FORK_DEPTH {
@@ -405,7 +390,6 @@ impl Blockchain {
     }
 }
 
-// Light client implementation
 pub struct LightClient {
     headers: Vec<crate::ledger::block::BlockHeader>,
 }

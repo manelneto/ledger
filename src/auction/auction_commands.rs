@@ -48,7 +48,6 @@ pub fn generate_auction_id(public_key: &[u8], title: &str, description: &str, no
     hasher.update(description.as_bytes());
     hasher.update(&nonce.to_le_bytes()); 
     
-    // TODO: decide how many bytes to use
     format!("{:x}", hasher.finalize())[..16].to_string()
 }
 
