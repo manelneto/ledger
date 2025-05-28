@@ -28,7 +28,7 @@ impl KBucket {
         self.nodes.iter().any(|n| n.get_id() == node.get_id())
     }
 
-    pub fn get_nodes(&self) -> impl Iterator<Item = Node> + '_ {
+    pub fn get_nodes(&self) -> impl Iterator<Item=Node> + '_ {
         self.nodes.iter().cloned()
     }
 

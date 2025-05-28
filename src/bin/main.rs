@@ -1,21 +1,21 @@
+use blockchain::auction::auction::{collect_auctions, find_auction_transactions, Auction, AuctionStatus};
+use blockchain::auction::auction_commands::{generate_auction_id, tx_bid, tx_create_auction, tx_end_auction, tx_start_auction, AuctionCommand};
+use blockchain::constants::DIFFICULTY;
+use blockchain::kademlia::kademlia_proto::kademlia_server::KademliaServer;
+use blockchain::kademlia::node::Node;
+use blockchain::kademlia::service::KademliaService;
+use blockchain::ledger::blockchain::Blockchain;
+use blockchain::ledger::transaction::TransactionType;
+use ed25519_dalek::Keypair;
 use std::collections::HashMap;
 use std::env;
 use std::io::{self, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
-use blockchain::auction::auction::{collect_auctions, find_auction_transactions, Auction, AuctionStatus};
-use blockchain::auction::auction_commands::{generate_auction_id, tx_bid, tx_create_auction, tx_end_auction, tx_start_auction, AuctionCommand};
-use tonic::transport::Server;
-use blockchain::kademlia::kademlia_proto::kademlia_server::KademliaServer;
-use blockchain::kademlia::node::Node;
-use blockchain::kademlia::service::KademliaService;
-use ed25519_dalek::Keypair;
 use tokio::io::{self as tokio_io, AsyncBufReadExt};
 use tokio::sync::Notify;
-use blockchain::constants::DIFFICULTY;
-use blockchain::ledger::blockchain::Blockchain;
-use blockchain::ledger::transaction::TransactionType;
+use tonic::transport::Server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -304,7 +304,6 @@ fn display_auction_bids(auction: &Auction, bids: Option<&Vec<BidInfo>>) {
                          total
                 );
             }
-
         } else {
             println!("\nNo bids have been placed on this auction yet.");
         }
@@ -397,66 +396,66 @@ async fn handle_view_bids_from_submenu(
 
 async fn handle_mine_block(node: &Node) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n[NODE {}] MINING BLOCK...", node.get_address().port());
-    
+
     let pool_size = {
         let pool = node.get_transaction_pool();
         let pool_guard = pool.lock().unwrap();
         pool_guard.size()
     };
-    
+
     if pool_size == 0 {
         println!("[NODE {}] No pending transactions - mining empty block", node.get_address().port());
     } else {
         println!("[NODE {}] Mining block with {} pending transactions", node.get_address().port(), pool_size);
-        
+
         let pool = node.get_transaction_pool();
         let pool_guard = pool.lock().unwrap();
         let transactions = pool_guard.get_all_transactions();
-        
+
         for (i, tx) in transactions.iter().enumerate() {
             if let Some(data) = &tx.data.data {
                 if data.starts_with("AUCTION_") {
                     let cmd_part = &data[8..std::cmp::min(data.len(), 50)];
-                    println!("   {}. Auction operation: {}", i+1, cmd_part);
+                    println!("   {}. Auction operation: {}", i + 1, cmd_part);
                 }
             } else if tx.data.amount.is_some() {
-                println!("   {}. Transfer: {} tokens", i+1, tx.data.amount.unwrap());
+                println!("   {}. Transfer: {} tokens", i + 1, tx.data.amount.unwrap());
             }
         }
     }
-    
+
     let start_time = std::time::Instant::now();
-    
+
     match node.mine_block().await {
         Ok(block) => {
             let mining_time = start_time.elapsed();
-            
-            println!("\n[MINING SUCCESS] Node {} mined block {}", 
+
+            println!("\n[MINING SUCCESS] Node {} mined block {}",
                      node.get_address().port(), block.index);
             println!("Block Hash: {}", hex::encode(&block.hash[..8]));
             println!("Nonce: {}", block.nonce);
             println!("Mining Time: {:.2}s", mining_time.as_secs_f64());
             println!("Transactions in Block: {}", block.transactions.len());
-            
+
             if block.transactions.len() > 0 {
                 println!("Block Contents:");
                 for (i, tx) in block.transactions.iter().enumerate() {
                     if let Some(data) = &tx.data.data {
                         if data.starts_with("AUCTION_") {
                             if data.contains("CreateAuction") {
-                                println!("   {}. CREATE_AUCTION transaction", i+1);
+                                println!("   {}. CREATE_AUCTION transaction", i + 1);
                             } else if data.contains("StartAuction") {
-                                println!("   {}. START_AUCTION transaction", i+1);
+                                println!("   {}. START_AUCTION transaction", i + 1);
                             } else if data.contains("Bid") {
-                                println!("   {}. BID transaction", i+1);
+                                println!("   {}. BID transaction", i + 1);
                             } else if data.contains("EndAuction") {
-                                println!("   {}. END_AUCTION transaction", i+1);
+                                println!("   {}. END_AUCTION transaction", i + 1);
                             }
                         }
                     }
                 }
             }
-            
+
             println!("[BLOCK PROPAGATION] Broadcasting block {} to network", block.index);
         }
         Err(e) => {
@@ -468,33 +467,33 @@ async fn handle_mine_block(node: &Node) -> Result<(), Box<dyn std::error::Error>
 
 fn handle_blockchain_info(node: &Node) {
     println!("\n[NODE {}] BLOCKCHAIN STATUS", node.get_address().port());
-    
+
     let (height, last_hash) = node.get_blockchain_info();
     println!("Chain Height: {} blocks", height);
-    
+
     if let Some(hash) = last_hash {
         println!("Last Block Hash: {}", &hash[..16]);
     }
-    
+
     let pool = node.get_transaction_pool();
     let pool_guard = pool.lock().unwrap();
     let pool_size = pool_guard.size();
     println!("Transaction Pool: {} pending transactions", pool_size);
-    
+
     let blockchain = node.get_blockchain();
     let blockchain_guard = blockchain.read().unwrap();
     let recent_blocks = if blockchain_guard.blocks.len() >= 3 {
-        &blockchain_guard.blocks[blockchain_guard.blocks.len()-3..]
+        &blockchain_guard.blocks[blockchain_guard.blocks.len() - 3..]
     } else {
         &blockchain_guard.blocks[..]
     };
-    
+
     println!("Recent Blocks:");
     for block in recent_blocks {
-        println!("  Block {}: {} transactions, hash: {}", 
-                block.index, 
-                block.transactions.len(), 
-                hex::encode(&block.hash[..8]));
+        println!("  Block {}: {} transactions, hash: {}",
+                 block.index,
+                 block.transactions.len(),
+                 hex::encode(&block.hash[..8]));
     }
 }
 
@@ -576,21 +575,21 @@ async fn handle_create_auction(
         let blockchain_guard = blockchain.read().unwrap();
         let blockchain_nonce = blockchain_guard.get_next_nonce(&keypair.public.to_bytes().to_vec());
         drop(blockchain_guard);
-        
+
         let pool = node.get_transaction_pool();
         let pool_guard = pool.lock().unwrap();
         let sender_key = keypair.public.to_bytes().to_vec();
         let pending_txs = pool_guard.get_pending_by_sender(&sender_key);
         let pending_count = pending_txs.len() as u64;
         drop(pool_guard);
-        
+
         blockchain_nonce + pending_count
     };
-    
+
     match tx_create_auction(keypair, title.clone(), description.clone(), correct_nonce) {
         Ok(transaction) => {
             let auction_id = generate_auction_id(&keypair.public.to_bytes(), &title, &description, correct_nonce);
-            
+
             match node.submit_transaction(transaction).await {
                 Ok(_) => {
                     println!("[AUCTION CREATED]");
@@ -598,7 +597,7 @@ async fn handle_create_auction(
                     println!("  Title: {}", title);
                     println!("  Description: {}", description);
                     println!("  Transaction submitted to pool");
-                    
+
                     let mut nonce_lock = nonce.lock().unwrap();
                     *nonce_lock = correct_nonce + 1;
                 }
@@ -623,25 +622,25 @@ async fn handle_list_auctions(
 
     let auction_txs = find_auction_transactions(&blockchain_data);
     let auctions = collect_auctions(&auction_txs.into_iter().cloned().collect::<Vec<_>>());
-    
+
     if auctions.is_empty() {
         println!("No auctions found in blockchain.");
         return Ok(());
     }
 
     println!("Found {} auction(s):\n", auctions.len());
-    
+
     for (id, auction) in &auctions {
         let status_symbol = match auction.status {
             AuctionStatus::Pending => "PENDING",
             AuctionStatus::Active => "ACTIVE",
             AuctionStatus::Ended => "ENDED",
         };
-        
+
         println!("[{}] Auction ID: {}", status_symbol, id);
         println!("  Title: {}", auction.title);
         println!("  Owner: {:02x?}", &auction.owner[..8]);
-        
+
         if let Some((amount, bidder)) = &auction.highest_bid {
             println!("  Highest Bid: {} by {:02x?}", amount, &bidder[..8]);
         } else {
@@ -666,7 +665,7 @@ async fn handle_bid(
     }
 
     let auction_id = prompt("Enter auction ID to bid on: ").await;
-    
+
     match auctions.get(&auction_id) {
         Some(auction) => {
             match auction.status {
@@ -680,13 +679,13 @@ async fn handle_bid(
                 }
                 AuctionStatus::Active => {}
             }
-        
+
             let my_public_key = keypair.public.to_bytes();
             if auction.owner == my_public_key {
                 println!("You cannot bid on your own auction.");
                 return Ok(());
             }
-        
+
             println!("Bidding on: {}", auction.title);
             println!("Auction ID: {}", auction_id);
             if let Some((current_bid, _)) = &auction.highest_bid {
@@ -695,9 +694,9 @@ async fn handle_bid(
             } else {
                 println!("No bids yet - you can place the first bid!");
             }
-        
+
             let bid_amount: u64 = prompt_parse("Enter your bid amount: ").await;
-        
+
             if let Some((current_highest, _)) = &auction.highest_bid {
                 if bid_amount <= *current_highest {
                     println!("Bid must be higher than current highest bid of {}", current_highest);
@@ -706,7 +705,7 @@ async fn handle_bid(
             }
 
             let correct_nonce = calculate_next_nonce(node, keypair);
-            
+
             match tx_bid(keypair, auction_id.clone(), bid_amount, correct_nonce) {
                 Ok(transaction) => {
                     match node.submit_transaction(transaction).await {
@@ -715,7 +714,7 @@ async fn handle_bid(
                             println!("  Auction ID: {}", auction_id);
                             println!("  Amount: {}", bid_amount);
                             println!("  Transaction submitted to pool");
-                            
+
                             let mut nonce_lock = nonce.lock().unwrap();
                             *nonce_lock = correct_nonce + 1;
                         }
@@ -723,7 +722,7 @@ async fn handle_bid(
                     }
                 }
                 Err(e) => println!("Failed to create bid transaction: {}", e),
-            }            
+            }
         }
         None => println!("Invalid auction ID"),
     }
@@ -749,24 +748,24 @@ async fn handle_my_auctions(
         .into_iter()
         .filter(|(_, auction)| auction.owner == my_public_key)
         .collect();
-    
+
     if my_auctions.is_empty() {
         println!("You haven't created any auctions yet.");
         return Ok(());
     }
 
     println!("You have {} auction(s):\n", my_auctions.len());
-    
+
     for (id, auction) in &my_auctions {
         let status_symbol = match auction.status {
             AuctionStatus::Pending => "PENDING",
             AuctionStatus::Active => "ACTIVE",
             AuctionStatus::Ended => "ENDED",
         };
-        
+
         println!("[{}] Your Auction ID: {}", status_symbol, id);
         println!("  Title: {}", auction.title);
-        
+
         if let Some((amount, bidder)) = &auction.highest_bid {
             println!("  Highest Bid: {} by {:02x?}", amount, &bidder[..8]);
         } else {
@@ -775,7 +774,7 @@ async fn handle_my_auctions(
         println!();
     }
 
-    my_auctions_submenu(&node,&my_auctions, keypair, nonce).await?;
+    my_auctions_submenu(&node, &my_auctions, keypair, nonce).await?;
     Ok(())
 }
 
@@ -804,7 +803,7 @@ async fn my_auctions_submenu(
         match input.as_str() {
             "0" => break,
             "S" => handle_start_auction(&node, my_auctions, keypair, nonce.clone()).await?,
-            "E" => handle_end_auction(&node,my_auctions, keypair, nonce.clone()).await?,
+            "E" => handle_end_auction(&node, my_auctions, keypair, nonce.clone()).await?,
             _ => println!("Invalid option."),
         }
     }
@@ -838,7 +837,7 @@ async fn handle_start_auction(
     match startable_auctions.get(&auction_id) {
         Some(auction) => {
             let correct_nonce = calculate_next_nonce(node, keypair);
-            
+
             match tx_start_auction(keypair, auction_id.clone(), correct_nonce) {
                 Ok(transaction) => {
                     match node.submit_transaction(transaction).await {
@@ -847,7 +846,7 @@ async fn handle_start_auction(
                             println!("  Auction ID: {}", auction_id);
                             println!("  Title: {}", auction.title);
                             println!("  Transaction submitted to pool");
-                            
+
                             let mut nonce_lock = nonce.lock().unwrap();
                             *nonce_lock = correct_nonce + 1;
                         }
@@ -908,7 +907,7 @@ async fn handle_end_auction(
             let confirm = prompt("Are you sure you want to end this auction? (y/N): ").await;
             if confirm.to_lowercase() == "y" || confirm.to_lowercase() == "yes" {
                 let correct_nonce = calculate_next_nonce(node, keypair);
-                
+
                 match tx_end_auction(keypair, auction_id.clone(), correct_nonce) {
                     Ok(transaction) => {
                         match node.submit_transaction(transaction).await {
@@ -916,7 +915,7 @@ async fn handle_end_auction(
                                 println!("[AUCTION ENDED]");
                                 println!("  Auction ID: {}", auction_id);
                                 println!("  Transaction submitted to pool");
-                                
+
                                 let mut nonce_lock = nonce.lock().unwrap();
                                 *nonce_lock = correct_nonce + 1;
                             }
@@ -968,13 +967,13 @@ fn calculate_next_nonce(node: &Node, keypair: &Keypair) -> u64 {
     let blockchain_guard = blockchain.read().unwrap();
     let blockchain_nonce = blockchain_guard.get_next_nonce(&keypair.public.to_bytes().to_vec());
     drop(blockchain_guard);
-    
+
     let pool = node.get_transaction_pool();
     let pool_guard = pool.lock().unwrap();
     let sender_key = keypair.public.to_bytes().to_vec();
     let pending_txs = pool_guard.get_pending_by_sender(&sender_key);
     let pending_count = pending_txs.len() as u64;
     drop(pool_guard);
-    
+
     blockchain_nonce + pending_count
 }

@@ -1,7 +1,7 @@
-use serde::{Serialize, Deserialize};
-use crate::ledger::transaction::{Transaction};
+use crate::ledger::transaction::Transaction;
 use ed25519_dalek::Keypair;
-use sha2::{Sha256, Digest};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum AuctionCommand {
@@ -43,11 +43,11 @@ pub fn create_auction_tx(
 
 pub fn generate_auction_id(public_key: &[u8], title: &str, description: &str, nonce: u64) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(public_key);      
+    hasher.update(public_key);
     hasher.update(title.as_bytes());
     hasher.update(description.as_bytes());
-    hasher.update(&nonce.to_le_bytes()); 
-    
+    hasher.update(&nonce.to_le_bytes());
+
     format!("{:x}", hasher.finalize())[..16].to_string()
 }
 
@@ -57,7 +57,6 @@ pub fn tx_create_auction(
     description: String,
     nonce: u64,
 ) -> Result<Transaction, &'static str> {
-
     let id = generate_auction_id(&key_pair.public.to_bytes(), &title, &description, nonce);
     let command = AuctionCommand::CreateAuction {
         id,

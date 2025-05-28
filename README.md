@@ -1,12 +1,15 @@
 # *Public Ledger for Auctions*
 
-Este projeto foi desenvolvido no âmbito da Unidade Curricular **Segurança de Sistemas e Dados (SSD)** do 2º semestre do 1º ano do **Mestrado em Segurança Informática (MSI)** da **Faculdade de Ciências da Universidade do Porto (FCUP)**, no ano letivo 2024/2025.
+Este projeto foi desenvolvido no âmbito da Unidade Curricular **Segurança de Sistemas e Dados (SSD)** do 2º semestre do
+1º ano do **Mestrado em Segurança Informática (MSI)** da **Faculdade de Ciências da Universidade do Porto (FCUP)**, no
+ano letivo 2024/2025.
 
 ## Informação do Grupo
 
 **Grupo:** 3
 
 **Membros:**
+
 - Eduardo Luís Fernandes Roçadas (up202108758)
 - Leonardo Araújo Freitas (up202400832)
 - Manuel Ramos Leite Carvalho Neto (up202108744)
@@ -14,6 +17,7 @@ Este projeto foi desenvolvido no âmbito da Unidade Curricular **Segurança de S
 ## Instruções de Instalação e Execução
 
 **Requisitos:**
+
 - [Rust](https://www.rust-lang.org/)
 - [protoc](https://protobuf.dev/)
 

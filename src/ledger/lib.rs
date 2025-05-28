@@ -29,5 +29,5 @@ pub fn bytes_to_u32(v: &[u8]) -> u128 {
 
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&v[len - 16..]);
-    u128::from_be_bytes(bytes) 
+    u128::from_be_bytes(bytes)
 }

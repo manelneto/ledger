@@ -1,6 +1,6 @@
 use super::*;
-use sha2::{Sha256, Digest};
 use crate::ledger::transaction::Transaction;
+use sha2::{Digest, Sha256};
 
 pub type MerkleHash = Vec<u8>;
 
@@ -73,7 +73,7 @@ impl MerkleTree {
             };
 
             let parent_hash = Self::hash_pair(&left.hash, &right.hash);
-            
+
             parent_nodes.push(Box::new(MerkleNode {
                 left: Some(left),
                 right: Some(right),
@@ -97,11 +97,11 @@ impl MerkleTree {
 
     pub fn generate_proof(&self, tx_hash: &[u8]) -> Option<MerkleProof> {
         let leaf_index = self.leaves.iter().position(|leaf| leaf == tx_hash)?;
-        
+
         let mut proof = Vec::new();
         let current_index = leaf_index;
         let current_level_size = self.leaves.len();
-        
+
         self.traverse_for_proof(
             self.root.as_ref()?,
             &mut proof,
@@ -214,12 +214,12 @@ impl MerkleTree {
     fn print_node(&self, node: &MerkleNode, depth: usize) {
         let indent = "  ".repeat(depth);
         println!("{}Hash: {}", indent, hex::encode(&node.hash));
-        
+
         if let Some(left) = &node.left {
             println!("{}Left:", indent);
             self.print_node(left, depth + 1);
         }
-        
+
         if let Some(right) = &node.right {
             println!("{}Right:", indent);
             self.print_node(right, depth + 1);

@@ -1,13 +1,13 @@
 use super::*;
-use std::vec;
-use std::collections::{HashMap, HashSet};
 use crate::constants::{DIFFICULTY_PREFIX, MAX_BLOCK_TIME, MAX_FORK_DEPTH, MAX_MINING_TIME, MIN_BLOCK_TIME};
 use crate::ledger::block::Block;
 use crate::ledger::lib::{now, BHash};
-use crate::ledger::transaction::{Transaction, PublicKey, TransactionType};
+use crate::ledger::merkle_tree::{MerkleProof, MerkleTree};
+use crate::ledger::transaction::{PublicKey, Transaction, TransactionType};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
-use crate::ledger::merkle_tree::{MerkleTree, MerkleProof};
-use serde::{Serialize, Deserialize};
+use std::vec;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Blockchain {
@@ -40,7 +40,7 @@ impl Blockchain {
     pub fn create_block(&self, transactions: Vec<Transaction>) -> Result<Block, &'static str> {
         let last_block = self.get_last_block()
             .ok_or("No blocks in chain")?;
-        
+
         let new_block = Block::new(
             last_block.index + 1,
             now(),
@@ -48,7 +48,7 @@ impl Blockchain {
             0,
             transactions,
         );
-        
+
         Ok(new_block)
     }
 
@@ -108,7 +108,7 @@ impl Blockchain {
         }
 
         self.validate_transactions(block)?;
-        
+
         Ok(())
     }
 
@@ -130,7 +130,7 @@ impl Blockchain {
             if let Some(amount) = tx.data.amount {
                 let sender_balance = self.balances.get(&tx.data.sender).unwrap_or(&0);
                 let total_cost = amount + tx.data.fee;
-                
+
                 if *sender_balance < total_cost {
                     return Err("Insufficient balance for transaction");
                 }
@@ -156,14 +156,14 @@ impl Blockchain {
                         let sender_balance = self.balances.entry(tx.data.sender.clone())
                             .or_insert(0);
                         *sender_balance = sender_balance.saturating_sub(amount + tx.data.fee);
-                        
+
                         if let Some(receiver) = &tx.data.receiver {
                             let receiver_balance = self.balances.entry(receiver.clone())
                                 .or_insert(0);
                             *receiver_balance += amount;
                         }
                     }
-                },
+                }
                 TransactionType::Data => {
                     let sender_balance = self.balances.entry(tx.data.sender.clone())
                         .or_insert(0);
@@ -228,7 +228,7 @@ impl Blockchain {
 
             if i > 0 {
                 let prev_block = &chain_to_validate[i - 1];
-                
+
                 if current_block.prev_hash != prev_block.hash {
                     return false;
                 }
@@ -290,21 +290,21 @@ impl Blockchain {
     fn validate_fork_chain(&self, fork_chain: &Vec<Block>, new_block: &Block) -> bool {
         for i in 1..fork_chain.len() {
             let current = &fork_chain[i];
-            let prev = &fork_chain[i-1];
-            
+            let prev = &fork_chain[i - 1];
+
             if current.prev_hash != prev.hash {
                 return false;
             }
-            
+
             if !self.is_block_hash_valid(&current.hash()) {
                 return false;
             }
         }
-        
+
         let last_fork = fork_chain.last().unwrap();
-        new_block.prev_hash == last_fork.hash && 
-        new_block.index == last_fork.index + 1 &&
-        self.is_block_hash_valid(&new_block.hash())
+        new_block.prev_hash == last_fork.hash &&
+            new_block.index == last_fork.index + 1 &&
+            self.is_block_hash_valid(&new_block.hash())
     }
 
     pub fn resolve_forks(&mut self) {
@@ -345,10 +345,10 @@ impl Blockchain {
         chain.iter().map(|block| {
             let leading_zeros = block.hash.iter()
                 .take_while(|&&byte| byte == 0)
-                .count() * 8 + 
+                .count() * 8 +
                 block.hash.iter()
-                .find(|&&byte| byte != 0)
-                .map_or(0, |&byte| byte.leading_zeros() as usize);
+                    .find(|&&byte| byte != 0)
+                    .map_or(0, |&byte| byte.leading_zeros() as usize);
             2u128.pow(leading_zeros as u32)
         }).sum()
     }
@@ -402,7 +402,7 @@ impl LightClient {
                 return Err("Invalid header chain");
             }
         }
-        
+
         self.headers.push(header);
         Ok(())
     }

@@ -16,11 +16,11 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::Path;
-use std::{fmt, fs};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
+use std::{fmt, fs};
 use tokio::time::{interval, timeout};
 use tonic::transport::Server;
 use tonic::{Request, Status};
@@ -63,7 +63,7 @@ struct StoredKeyData {
 
 impl Node {
     pub fn new(address: SocketAddr) -> Self {
-        let (public_key, private_key) = Self::get_or_create_keypair(address);        
+        let (public_key, private_key) = Self::get_or_create_keypair(address);
         let hash = Sha256::digest(public_key);
         let id = hash[..ID_LENGTH]
             .try_into()
@@ -83,7 +83,7 @@ impl Node {
     }
 
     pub fn new_with_id(address: SocketAddr, id: [u8; ID_LENGTH]) -> Self {
-        let (public_key, private_key) = Self::get_or_create_keypair(address);        
+        let (public_key, private_key) = Self::get_or_create_keypair(address);
 
         Self {
             public_key: public_key,
@@ -101,43 +101,43 @@ impl Node {
     fn get_or_create_keypair(address: SocketAddr) -> ([u8; CRYPTO_KEY_LENGTH], [u8; CRYPTO_KEY_LENGTH]) {
         let ip_str = address.ip().to_string().replace(":", "_");
         let key_file_path = format!("keys/{}_{}.json", ip_str, address.port());
-        
+
         if let Ok(existing_keys) = Self::load_keypair_from_file(&key_file_path) {
             return existing_keys;
         }
-        
+
         let keypair = Keypair::generate(&mut OsRng);
         let public_key = keypair.public.to_bytes();
         let private_key = keypair.secret.to_bytes();
-        
+
         let _ = Self::save_keypair_to_file(&key_file_path, &public_key, &private_key);
-        
+
         (public_key, private_key)
     }
-    
+
     fn load_keypair_from_file(file_path: &str) -> Result<([u8; CRYPTO_KEY_LENGTH], [u8; CRYPTO_KEY_LENGTH]), Box<dyn std::error::Error>> {
         let contents = fs::read_to_string(file_path)?;
         let stored_data: StoredKeyData = serde_json::from_str(&contents)?;
         Ok((stored_data.public_key, stored_data.private_key))
     }
-    
+
     fn save_keypair_to_file(
-        file_path: &str, 
-        public_key: &[u8; CRYPTO_KEY_LENGTH], 
-        private_key: &[u8; CRYPTO_KEY_LENGTH]
+        file_path: &str,
+        public_key: &[u8; CRYPTO_KEY_LENGTH],
+        private_key: &[u8; CRYPTO_KEY_LENGTH],
     ) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(parent) = Path::new(file_path).parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         let stored_data = StoredKeyData {
             public_key: *public_key,
             private_key: *private_key,
         };
-        
+
         let json_data = serde_json::to_string_pretty(&stored_data)?;
         fs::write(file_path, json_data)?;
-        
+
         Ok(())
     }
 
@@ -298,13 +298,12 @@ impl Node {
                         Duration::from_secs(5),
                         self.store_at(&node, key, data_clone),
                     )
-                    .await;
+                        .await;
                 });
             }
         }
 
-        while let Some(_) = broadcast_futures.next().await {
-        }
+        while let Some(_) = broadcast_futures.next().await {}
     }
 
     pub async fn sync_blockchain(&self) {
@@ -485,7 +484,7 @@ impl Node {
 
     async fn receive_new_block(&self, block: Block) -> Result<(), &'static str> {
         println!("\n\nReceived block {}", block.index);
-        
+
         let mut blockchain = self.blockchain.write().unwrap();
         match blockchain.receive_block(block.clone()) {
             Ok(_) => {

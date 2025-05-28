@@ -1,10 +1,10 @@
-use std::fmt::{ self, Debug, Formatter };
-use std::vec;
-use crate::ledger::lib::{u128_to_bytes, u32_to_bytes, u64_to_bytes, BHash};
-use crate::ledger::transaction::Transaction;
-use crate::ledger::merkle_tree::MerkleTree;
-use serde::{Serialize, Deserialize};
 use super::*;
+use crate::ledger::lib::{u128_to_bytes, u32_to_bytes, u64_to_bytes, BHash};
+use crate::ledger::merkle_tree::MerkleTree;
+use crate::ledger::transaction::Transaction;
+use serde::{Deserialize, Serialize};
+use std::fmt::{self, Debug, Formatter};
+use std::vec;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Block {
@@ -19,7 +19,7 @@ pub struct Block {
 }
 
 impl Debug for Block {
-    fn  fmt (&self, f: &mut Formatter) -> fmt::Result{
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Block[{}]: {} at: {} with: {} {}",
                &self.index,
                &hex::encode(&self.hash),
@@ -30,17 +30,16 @@ impl Debug for Block {
     }
 }
 
-impl Block{
-    pub fn new (index: u32, timestamp: u128, prev_hash: BHash,
-                nonce: u64, transactions: Vec<Transaction>) -> Self{
-        
+impl Block {
+    pub fn new(index: u32, timestamp: u128, prev_hash: BHash,
+               nonce: u64, transactions: Vec<Transaction>) -> Self {
         let merkle_tree = MerkleTree::new(&transactions);
-        let merkle_root = merkle_tree.get_root_hash().unwrap_or_else(|| vec![0;32]);
+        let merkle_root = merkle_tree.get_root_hash().unwrap_or_else(|| vec![0; 32]);
         let tx_count = transactions.len() as u32;
-        Block{
+        Block {
             index,
             timestamp,
-            hash: vec![0;32],
+            hash: vec![0; 32],
             prev_hash,
             nonce,
             merkle_root,
@@ -50,14 +49,14 @@ impl Block{
     }
 
     pub fn genesis() -> Self {
-        Block { 
-            index: 0, 
-            timestamp: crate::ledger::lib::now(), 
-            hash: vec![0; 32], 
-            prev_hash: vec![0; 32], 
-            nonce: 0, 
-            merkle_root: vec![0; 32], 
-            transactions: Vec::new(), 
+        Block {
+            index: 0,
+            timestamp: crate::ledger::lib::now(),
+            hash: vec![0; 32],
+            prev_hash: vec![0; 32],
+            nonce: 0,
+            merkle_root: vec![0; 32],
+            transactions: Vec::new(),
             tx_count: 0,
         }
     }

@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use tokio::sync::Notify;
 use crate::constants::{DIFFICULTY, ID_LENGTH, K, KEY_LENGTH};
 use crate::kademlia::kademlia_proto::kademlia_server::Kademlia;
-use crate::kademlia::kademlia_proto::{Node as ProtoNode, PingRequest, PingResponse, StoreRequest, StoreResponse, FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse, JoinRequest, JoinResponse, ShutdownRequest, ShutdownResponse};
-use crate::kademlia::node::{Node, BlockchainMessage};
+use crate::kademlia::kademlia_proto::{FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse, JoinRequest, JoinResponse, Node as ProtoNode, PingRequest, PingResponse, ShutdownRequest, ShutdownResponse, StoreRequest, StoreResponse};
+use crate::kademlia::node::{BlockchainMessage, Node};
+use std::sync::Arc;
+use tokio::sync::Notify;
 use tonic::{Request, Response, Status};
 
 pub struct KademliaService {
@@ -172,7 +172,7 @@ impl Kademlia for KademliaService {
                 .into_iter()
                 .map(|n| n.to_send())
                 .collect::<Vec<_>>();
-            
+
             if !nodes.iter().any(|n| n.id == self.node.get_id().to_vec()) {
                 nodes.push(self.node.to_send());
             }
@@ -186,17 +186,17 @@ impl Kademlia for KademliaService {
             async move {
                 let blockchain = node.get_blockchain().read().unwrap().clone();
                 let message = BlockchainMessage::ResponseFullBlockchain { blockchain };
-                
+
                 if let Ok(data) = serde_json::to_vec(&message) {
                     let blockchain_key = {
-                        use sha2::{Sha256, Digest};
+                        use sha2::{Digest, Sha256};
                         let mut hasher = Sha256::new();
                         hasher.update(b"initial_blockchain");
                         hasher.update(sender_node.get_id());
                         let hash = hasher.finalize();
                         hash[..KEY_LENGTH].try_into().unwrap_or([0; KEY_LENGTH])
                     };
-                    
+
                     let _ = node.store(blockchain_key, data).await;
                 }
             }

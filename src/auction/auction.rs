@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::ledger::{blockchain::Blockchain, transaction::{Transaction, TransactionType}};
 use crate::auction::auction_commands::AuctionCommand;
+use crate::ledger::{blockchain::Blockchain, transaction::{Transaction, TransactionType}};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuctionStatus {
@@ -25,7 +25,7 @@ pub struct Auction {
 
 pub fn find_auction_transactions(blockchain: &Blockchain) -> Vec<&Transaction> {
     let mut auction_txs = Vec::new();
-    
+
     for block in &blockchain.blocks {
         for tx in &block.transactions {
             if tx.data.tx_type != TransactionType::Data { continue; }
@@ -75,18 +75,18 @@ pub fn collect_auctions(transactions: &[Transaction]) -> HashMap<String, Auction
                         title,
                         description,
                         created_time: tx.data.timestamp,
-                        start_time: None,  
-                        end_time: None,    
+                        start_time: None,
+                        end_time: None,
                         highest_bid: None,
                     },
                 );
             }
-            
+
             AuctionCommand::StartAuction { id } => {
                 if let Some(auction) = auctions.get_mut(&id) {
                     if auction.owner == tx.data.sender {
                         auction.start_time = Some(tx.data.timestamp);
-                        auction.status= AuctionStatus::Active;
+                        auction.status = AuctionStatus::Active;
                     }
                 }
             }
@@ -94,29 +94,29 @@ pub fn collect_auctions(transactions: &[Transaction]) -> HashMap<String, Auction
             AuctionCommand::EndAuction { id } => {
                 if let Some(auction) = auctions.get_mut(&id) {
                     if auction.owner == tx.data.sender {
-                        auction.end_time = Some(tx.data.timestamp);                        
-                        auction.status=AuctionStatus::Ended;
+                        auction.end_time = Some(tx.data.timestamp);
+                        auction.status = AuctionStatus::Ended;
                     }
                 }
             }
 
             AuctionCommand::Bid { id, amount } => {
-                    let Some(auction) = auctions.get_mut(&id) else { continue };
+                let Some(auction) = auctions.get_mut(&id) else { continue };
 
                 if auction.status != AuctionStatus::Active {
                     continue;
                 }
-            
+
                 if tx.data.sender == auction.owner {
                     continue;
                 }
-            
+
                 let is_active_period = match (auction.start_time, auction.end_time) {
                     (Some(start), None) => tx.data.timestamp >= start,
                     (Some(start), Some(end)) => tx.data.timestamp >= start && tx.data.timestamp <= end,
                     _ => false,
                 };
-            
+
                 if !is_active_period {
                     continue;
                 }
