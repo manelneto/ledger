@@ -14,6 +14,8 @@ ano letivo 2024/2025.
 - Leonardo Araújo Freitas (up202400832)
 - Manuel Ramos Leite Carvalho Neto (up202108744)
 
+**Nota Final:** 18/20
+
 ## Instruções de Instalação e Execução
 
 **Requisitos:**
